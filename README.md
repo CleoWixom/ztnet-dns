@@ -112,53 +112,65 @@ Exposes Prometheus metrics:
 
 ### 1) Prepare environment
 
-```bash
-sudo apt-get update
-sudo apt-get install -y git build-essential ca-certificates
-```
-
-Install Go `1.24+` and ensure `go version` reports a patched release (recommended: `1.25.7+`).
-
-### 2) Clone and verify
+Install Go `1.24+` (patched release recommended, e.g. `1.25.7+`) and clone the repository:
 
 ```bash
 git clone https://github.com/CleoWixom/ztnet-dns.git
 cd ztnet-dns
-go mod tidy
-go test ./... -race -count=1
 ```
 
-### 3) Build plugin package artifacts (repository local)
+For Linux systems with `apt`, install required build dependencies via Makefile:
 
 ```bash
-go build ./...
+make install-deps
 ```
 
-### 4) Integrate into a CoreDNS binary (external plugin flow)
+If Go is not installed, run:
+
+```bash
+make ensure-go
+```
+
+### 2) Verify plugin source
+
+```bash
+make verify
+```
+
+### 3) Build plugin packages (repository local)
+
+```bash
+make build-plugin
+```
+
+### 4) Build CoreDNS with ztnet plugin (external plugin flow)
 
 > **Compatibility note:** build this plugin with the same CoreDNS branch/version used for the final binary. Mixing mismatched CoreDNS/quic-go versions can break QUIC build (e.g. `undefined: quic.Connection`).
 
-1. In your CoreDNS source tree, add `ztnet:github.com/CleoWixom/ztnet-dns` to `plugin.cfg`.
-2. Run CoreDNS build:
+Build using the automated target:
 
 ```bash
-go generate
-go build
+make build-coredns
 ```
 
-3. Use `Corefile.example` from this repo as a starting point and configure `ztnet` block for your environment.
+This target clones CoreDNS `v1.14.0`, injects `ztnet` into `plugin.cfg`, runs `go generate`, and builds a Linux `amd64` CoreDNS binary in `$(COREDNS_WORKDIR)/coredns`.
 
-4. Install helper script into a PATH directory (for non-deb/manual installs):
+Use `Corefile.example` from this repo as a starting point and configure the `ztnet` block for your environment.
+
+### 5) Install helper script into system PATH
+
+For manual installs, run a full flow:
 
 ```bash
 sudo make install
-# installs to /usr/bin/ztnet.token.install by default
 ```
 
-For package installs (`.deb`), the same helper is installed automatically to `/usr/bin/ztnet.token.install`.
+`make install` performs: `ensure-go`, `verify`, `build-coredns`, binary install (`/usr/sbin/coredns`), config/unit install (`/etc/coredns`, `/lib/systemd/system`), helper install (`/usr/bin/ztnet.token.install`), and service activation.
+
+For package installs (`.deb`), the helper is installed automatically to `/usr/bin/ztnet.token.install`.
 
 
-### 5) Settings (configuration)
+### 6) Settings (configuration)
 
 To automate secure token setup/rotation, use:
 
@@ -173,35 +185,37 @@ The script automates:
 - `token_file` verification in Corefile,
 - secure token rotation without storing secrets in Corefile.
 
-#### 5.1 Generate a ZTNET API token
+**About `zt.example.com { ... }` and `zone zt.example.com`:** the first value is the CoreDNS server block zone, while `zone` is an explicit plugin setting required by `ztnet` parser. Keep them identical to avoid confusing behavior and to make configuration intent explicit.
+
+#### 6.1 Generate a ZTNET API token
 
 Generate a token in the ZTNET UI (API tokens / personal token), then provide it to the script using one of the methods below.
 
-#### 5.2 Basic token install (argument)
+#### 6.2 Basic token install (argument)
 
 ```bash
 sudo ztnet.token.install "<ZTNET_API_TOKEN>"
 ```
 
-#### 5.3 Token install via stdin
+#### 6.3 Token install via stdin
 
 ```bash
 printf '%s\\n' "<ZTNET_API_TOKEN>" | sudo ztnet.token.install
 ```
 
-#### 5.4 Interactive token input (hidden)
+#### 6.4 Interactive token input (hidden)
 
 ```bash
 sudo ztnet.token.install
 ```
 
-#### 5.5 Token rotation
+#### 6.5 Token rotation
 
 ```bash
 sudo ztnet.token.install "<NEW_ZTNET_API_TOKEN>" --rotate
 ```
 
-#### 5.6 Additional options
+#### 6.6 Additional options
 
 ```bash
 # if Corefile path or service group differs from defaults
