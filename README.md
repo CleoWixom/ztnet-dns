@@ -2,10 +2,16 @@
 
 CoreDNS external plugin for serving A/AAAA records of **authorized ZeroTier members** from ZTNET API.
 
+## Production readiness status
+
+- ✅ Core DNS behavior is implemented (zone-first routing, access control only for plugin zone, stale-on-error cache behavior).
+- ✅ Dependency vulnerabilities in `github.com/coredns/coredns` and related runtime modules have been remediated by upgrading to CoreDNS `v1.14.0`.
+- ⚠️ Remaining reported vulnerabilities are in the **local Go toolchain stdlib** used during build/runtime checks; use an up-to-date Go patch version in production.
+
 ## What the plugin does
 
-- Serves DNS only for configured zone (`zone`).
-- For queries outside configured zone, forwards request to next CoreDNS plugin (does not block global DNS).
+- Serves DNS only for configured plugin zone (`zone`).
+- For out-of-zone queries, forwards request to next CoreDNS plugin (does not block global DNS).
 - Applies source-IP access control only for plugin zone using allowlist from:
   - static `allowed_networks`
   - optional ZeroTier routes (`auto_allow_zt true`, only routes with `via == nil`)
@@ -16,8 +22,8 @@ CoreDNS external plugin for serving A/AAAA records of **authorized ZeroTier memb
 
 ## Requirements
 
-- Go `1.22+` for build/tests.
-- CoreDNS with plugin compiled in (see `plugin.cfg` workflow for external plugins).
+- Go `1.24+`.
+- CoreDNS with plugin compiled in (external plugin workflow).
 - Reachable ZTNET API.
 
 ## Configuration
@@ -80,7 +86,7 @@ zt.example.com {
 | `timeout` | no | `5s` | HTTP timeout |
 | `max_retries` | no | `3` | Retries for API 5xx / transport errors |
 
-## Behavior details
+## DNS behavior
 
 - Query without questions: `SERVFAIL`.
 - Out-of-zone query: passed to next plugin.
@@ -102,6 +108,44 @@ Exposes Prometheus metrics:
 - `coredns_ztnet_cache_entries{zone,type}`
 - `coredns_ztnet_token_reload_total{zone,source,status}`
 
+## Build on Linux from source
+
+### 1) Prepare environment
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git build-essential ca-certificates
+```
+
+Install Go `1.24+` and ensure `go version` reports the expected patch version.
+
+### 2) Clone and verify
+
+```bash
+git clone https://github.com/CleoWixom/ztnet-dns.git
+cd ztnet-dns
+go mod tidy
+go test ./... -race -count=1
+```
+
+### 3) Build plugin package artifacts (repository local)
+
+```bash
+go build ./...
+```
+
+### 4) Integrate into a CoreDNS binary (external plugin flow)
+
+1. In your CoreDNS source tree, add `ztnet:github.com/CleoWixom/ztnet-dns` to `plugin.cfg`.
+2. Run CoreDNS build:
+
+```bash
+go generate
+go build
+```
+
+3. Use `Corefile.example` from this repo as a starting point and configure `ztnet` block for your environment.
+
 ## Development checks
 
 ```bash
@@ -113,4 +157,4 @@ golangci-lint run ./...
 
 - Avoid `api_token` inline in production; prefer `token_file` or `token_env`.
 - Token is loaded during refresh and is not persisted in plugin state.
-- Keep upstream dependencies and Go toolchain updated (see `AUDIT_REPORT.md`).
+- Keep Go patch version updated (stdlib vulnerabilities are fixed via Go toolchain patch updates).
