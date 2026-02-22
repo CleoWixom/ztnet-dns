@@ -15,6 +15,33 @@
 
 ## АУДИТ 0: Предварительная проверка
 
+- `go test -race -count=1 -timeout=120s ./...` → PASS.
+- `golangci-lint run --output.text.path stdout ./...` → PASS (совместимо с golangci-lint v2.x).
+- `golangci-lint run ./...` → `0 issues`.
+
+> Примечание по совместимости: флаг `--out-format` удалён в golangci-lint v2.x. Для v2 используйте `--output.*` флаги (например, `--output.text.path stdout`) или базовый `golangci-lint run ./...`.
+- `git log --all --oneline -S "api_token" -- '*.go' '*.md' Corefile*` → есть исторические коммиты с `api_token`.
+- `govulncheck ./...` (после установки) → обнаружены уязвимости в stdlib и зависимостях (в т.ч. CoreDNS, quic-go).
+
+### [HIGH] Уязвимые версии в рантайме/зависимостях
+
+**Файл:** `go.mod`, строки 7, 29
+**Проблема:** фиксируется `github.com/coredns/coredns v1.11.4` и транзитивно `github.com/quic-go/quic-go v0.48.1`; `govulncheck` показывает multiple CVE/GO advisories для этих версий.
+**Требование /AGENTS.md:** security-sensitive инфраструктура, нельзя игнорировать security risk.
+
+**Текущий код:**
+```go
+require (
+    github.com/coredns/coredns v1.11.4
+)
+...
+    github.com/quic-go/quic-go v0.48.1 // indirect
+```
+
+**Исправление:**
+```go
+require github.com/coredns/coredns v1.14.0
+// затем go mod tidy, повторный govulncheck
 ```bash
 go test -race -count=1 -timeout=120s ./...
 golangci-lint run --out-format=line-number ./...
