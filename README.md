@@ -149,66 +149,66 @@ go build
 3. Use `Corefile.example` from this repo as a starting point and configure `ztnet` block for your environment.
 
 
-### 5) Settings (настройки / конфигурация)
+### 5) Settings (configuration)
 
-Для автоматизации добавлен скрипт:
+To automate secure token setup/rotation, use:
 
 ```bash
 sudo ./scripts/ztnet-token-setup.sh --help
 ```
 
-Скрипт автоматизирует:
-- ввод токена через аргумент, stdin (pipe) или скрытый interactive input,
-- безопасное сохранение в `/run/secrets/ztnet_token`,
-- установку `chown root:coredns` и `chmod 0440`,
-- проверку `token_file` в Corefile,
-- безопасную ротацию токена без хранения в Corefile.
+The script automates:
+- token input via argument, stdin (pipe), or hidden interactive input,
+- secure save to `/run/secrets/ztnet_token`,
+- permission hardening via `chown root:coredns` and `chmod 0440`,
+- `token_file` verification in Corefile,
+- secure token rotation without storing secrets in Corefile.
 
-#### 5.1 Генерация токена ZTNET API
+#### 5.1 Generate a ZTNET API token
 
-Сгенерируйте токен в UI ZTNET (API tokens / personal token). После этого передайте его скрипту одним из способов ниже.
+Generate a token in the ZTNET UI (API tokens / personal token), then provide it to the script using one of the methods below.
 
-#### 5.2 Базовая установка токена (аргумент)
+#### 5.2 Basic token install (argument)
 
 ```bash
 sudo ./scripts/ztnet-token-setup.sh "<ZTNET_API_TOKEN>"
 ```
 
-#### 5.3 Установка токена через stdin
+#### 5.3 Token install via stdin
 
 ```bash
 printf '%s\\n' "<ZTNET_API_TOKEN>" | sudo ./scripts/ztnet-token-setup.sh
 ```
 
-#### 5.4 Интерактивный ввод токена (hidden input)
+#### 5.4 Interactive token input (hidden)
 
 ```bash
 sudo ./scripts/ztnet-token-setup.sh
 ```
 
-#### 5.5 Ротация токена
+#### 5.5 Token rotation
 
 ```bash
 sudo ./scripts/ztnet-token-setup.sh "<NEW_ZTNET_API_TOKEN>" --rotate
 ```
 
-#### 5.6 Дополнительные параметры
+#### 5.6 Additional options
 
 ```bash
-# если Corefile или группа отличаются от дефолта
+# if Corefile path or service group differs from defaults
 sudo ./scripts/ztnet-token-setup.sh "<TOKEN>" \
   --token-file /run/secrets/ztnet_token \
   --corefile /etc/coredns/Corefile \
   --group coredns
 ```
 
-По умолчанию скрипт проверяет наличие строки:
+By default, the script checks for this exact line:
 
 ```corefile
 token_file /run/secrets/ztnet_token
 ```
 
-Если в Corefile указано другое расположение секрета — передайте его через `--token-file`.
+If your Corefile uses a different token path, pass it explicitly via `--token-file`.
 
 ## Development checks
 
