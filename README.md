@@ -4,9 +4,8 @@ CoreDNS external plugin for serving A/AAAA records of **authorized ZeroTier memb
 
 ## Production readiness status
 
-- ✅ Core DNS behavior is implemented (zone-first routing, access control only for plugin zone, stale-on-error cache behavior).
-- ✅ Dependency vulnerabilities in `github.com/coredns/coredns` and related runtime modules have been remediated by upgrading to CoreDNS `v1.14.0`.
-- ⚠️ Remaining reported vulnerabilities are in the **local Go toolchain stdlib** used during build/runtime checks; use an up-to-date Go patch version in production.
+- ✅ Core behavior is implemented for production use (zone-first routing, stale-on-error cache, atomic allowlist updates).
+- ⚠️ Dependency and runtime security posture must be validated in your target environment (CoreDNS version + Go patch level + periodic `govulncheck`).
 
 ## What the plugin does
 
@@ -22,7 +21,7 @@ CoreDNS external plugin for serving A/AAAA records of **authorized ZeroTier memb
 
 ## Requirements
 
-- Go `1.24+`.
+- Go `1.22+` (use latest patched Go release in production).
 - CoreDNS with plugin compiled in (external plugin workflow).
 - Reachable ZTNET API.
 
@@ -117,7 +116,7 @@ sudo apt-get update
 sudo apt-get install -y git build-essential ca-certificates
 ```
 
-Install Go `1.24+` and ensure `go version` reports the expected patch version.
+Install Go `1.22+` and ensure `go version` reports a patched release for production environments.
 
 ### 2) Clone and verify
 
@@ -135,6 +134,8 @@ go build ./...
 ```
 
 ### 4) Integrate into a CoreDNS binary (external plugin flow)
+
+> **Compatibility note:** build this plugin with the same CoreDNS branch/version used for the final binary. Mixing mismatched CoreDNS/quic-go versions can break QUIC build (e.g. `undefined: quic.Connection`).
 
 1. In your CoreDNS source tree, add `ztnet:github.com/CleoWixom/ztnet-dns` to `plugin.cfg`.
 2. Run CoreDNS build:
