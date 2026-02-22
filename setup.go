@@ -22,12 +22,16 @@ func setup(c *caddy.Controller) error {
 	if err != nil {
 		return plugin.Error("ztnet", err)
 	}
+	p := &ZtnetPlugin{zone: cfg.Zone, cfg: cfg, cache: NewRecordCache(), api: &APIClient{BaseURL: cfg.APIURL, NetworkID: cfg.NetworkID, HTTPClient: &http.Client{}, MaxRetries: cfg.MaxRetries}}
+	p.start(context.Background())
 	dnsserver.GetConfig(c).AddPlugin(func(next plugin.Handler) plugin.Handler {
-		p := &ZtnetPlugin{Next: next, zone: cfg.Zone, cfg: cfg, cache: NewRecordCache(), api: &APIClient{BaseURL: cfg.APIURL, NetworkID: cfg.NetworkID, HTTPClient: &http.Client{}, MaxRetries: cfg.MaxRetries}}
-		p.start(context.Background())
+		p.Next = next
 		return p
 	})
-	c.OnFinalShutdown(func() error { return nil })
+	c.OnFinalShutdown(func() error {
+		p.stop()
+		return nil
+	})
 	clog.Infof("ztnet: configured zone %s", cfg.Zone)
 	return nil
 }

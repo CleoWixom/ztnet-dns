@@ -175,7 +175,7 @@ jobs:
           else
             SHA=$(git rev-parse --short HEAD)
             echo "pkg=0.0.0+${SHA}" >> "$GITHUB_OUTPUT"
-            echo "plugin_ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+            echo "plugin_ref=local" >> "$GITHUB_OUTPUT"
           fi
 
       # ── Клонируем CoreDNS ─────────────────────────────────────────────
@@ -195,17 +195,27 @@ jobs:
           grep -n "ztnet\|forward" plugin.cfg
 
       # ── Подтягиваем код плагина ───────────────────────────────────────
-      # На теге используем тег, на PR/main — конкретный коммит
+      # На теге используем опубликованный тег модуля.
+      # На ветках/PR используем локальный checkout через replace,
+      # чтобы не зависеть от доступности merge SHA в module proxy.
       - name: Add plugin dependency
         working-directory: /tmp/coredns
         run: |
-          go get "$PLUGIN_MODULE@${{ steps.version.outputs.plugin_ref }}"
-          go mod tidy
+          if [[ "${{ steps.version.outputs.plugin_ref }}" == "local" ]]; then
+            go mod edit -replace "${PLUGIN_MODULE}=${GITHUB_WORKSPACE}"
+            go get "${PLUGIN_MODULE}"
+          else
+            go get "${PLUGIN_MODULE}@${{ steps.version.outputs.plugin_ref }}"
+          fi
 
       # ── go generate: регенерируем zplugin.go ──────────────────────────
       - name: go generate
         working-directory: /tmp/coredns
         run: go generate
+
+      - name: Tidy modules
+        working-directory: /tmp/coredns
+        run: go mod tidy
 
       # ── Компилируем статический бинарь ────────────────────────────────
       - name: Build coredns binary (amd64)
@@ -227,9 +237,12 @@ jobs:
       # ── Устанавливаем nfpm ────────────────────────────────────────────
       - name: Install nfpm
         run: |
-          curl -sSfL \
-            https://github.com/goreleaser/nfpm/releases/latest/download/nfpm_$(uname -s)_$(uname -m).tar.gz \
-            | tar -xz -C /usr/local/bin nfpm
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          GOBIN_PATH="$(go env GOBIN)"
+          if [[ -z "$GOBIN_PATH" ]]; then
+            GOBIN_PATH="$(go env GOPATH)/bin"
+          fi
+          echo "$GOBIN_PATH" >> "$GITHUB_PATH"
           nfpm --version
 
       # ── Собираем .deb ─────────────────────────────────────────────────

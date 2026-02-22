@@ -150,7 +150,9 @@ func TestServeDNS_REFUSED_External(t *testing.T) {
 func TestLoadToken_FileEnvInline(t *testing.T) {
 	d := t.TempDir()
 	fp := filepath.Join(d, "tok")
-	os.WriteFile(fp, []byte(" abc \n"), 0o600)
+	if err := os.WriteFile(fp, []byte(" abc \n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
 	if tok, _ := LoadToken(TokenConfig{Source: "file", Value: fp}); tok != "abc" {
 		t.Fatal(tok)
 	}
