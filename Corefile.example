@@ -1,0 +1,21 @@
+zt.example.com {
+    ztnet {
+        api_url http://ztnet.local:3000
+        network_id 8056c2e21c000001
+        zone zt.example.com
+        token_file /run/secrets/ztnet_token
+        auto_allow_zt true
+        refresh 30s
+        timeout 5s
+        ttl 60
+    }
+    prometheus :9153
+    errors
+    log
+}
+
+. {
+    bind 10.147.20.1
+    forward . 1.1.1.1 8.8.8.8
+    cache
+}
