@@ -9,12 +9,18 @@ import (
 
 // ComputeRFC4193 computes a deterministic ULA for network+node pair.
 func ComputeRFC4193(networkID, nodeID string) (net.IP, error) {
+	if len(networkID) != 16 {
+		return nil, fmt.Errorf("invalid networkID length: %d", len(networkID))
+	}
+	if len(nodeID) != 10 {
+		return nil, fmt.Errorf("invalid nodeID length: %d", len(nodeID))
+	}
 	nb, err := hex.DecodeString(networkID)
-	if err != nil || len(nb) == 0 {
+	if err != nil {
 		return nil, fmt.Errorf("invalid networkID: %w", err)
 	}
 	node, err := hex.DecodeString(nodeID)
-	if err != nil || len(node) == 0 {
+	if err != nil {
 		return nil, fmt.Errorf("invalid nodeID: %w", err)
 	}
 	h := sha256.Sum256(append(nb, node...))
@@ -27,12 +33,18 @@ func ComputeRFC4193(networkID, nodeID string) (net.IP, error) {
 
 // Compute6plane computes fcXX:XXXX style address for network+node pair.
 func Compute6plane(networkID, nodeID string) (net.IP, error) {
+	if len(networkID) != 16 {
+		return nil, fmt.Errorf("invalid networkID length: %d", len(networkID))
+	}
+	if len(nodeID) != 10 {
+		return nil, fmt.Errorf("invalid nodeID length: %d", len(nodeID))
+	}
 	nb, err := hex.DecodeString(networkID)
-	if err != nil || len(nb) < 4 {
+	if err != nil {
 		return nil, fmt.Errorf("invalid networkID: %w", err)
 	}
 	node, err := hex.DecodeString(nodeID)
-	if err != nil || len(node) < 5 {
+	if err != nil {
 		return nil, fmt.Errorf("invalid nodeID: %w", err)
 	}
 	ip := make(net.IP, 16)
