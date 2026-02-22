@@ -237,9 +237,12 @@ jobs:
       # ── Устанавливаем nfpm ────────────────────────────────────────────
       - name: Install nfpm
         run: |
-          curl -sSfL \
-            https://github.com/goreleaser/nfpm/releases/latest/download/nfpm_$(uname -s)_$(uname -m).tar.gz \
-            | tar -xz -C /usr/local/bin nfpm
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          GOBIN_PATH="$(go env GOBIN)"
+          if [[ -z "$GOBIN_PATH" ]]; then
+            GOBIN_PATH="$(go env GOPATH)/bin"
+          fi
+          echo "$GOBIN_PATH" >> "$GITHUB_PATH"
           nfpm --version
 
       # ── Собираем .deb ─────────────────────────────────────────────────
