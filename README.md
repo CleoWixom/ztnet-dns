@@ -151,56 +151,64 @@ go build
 
 ### 5) Settings (настройки / конфигурация)
 
-Ниже рекомендуемый production-процесс для API токена и секрета.
+Для автоматизации добавлен скрипт:
+
+```bash
+sudo ./scripts/ztnet-token-setup.sh --help
+```
+
+Скрипт автоматизирует:
+- ввод токена через аргумент, stdin (pipe) или скрытый interactive input,
+- безопасное сохранение в `/run/secrets/ztnet_token`,
+- установку `chown root:coredns` и `chmod 0440`,
+- проверку `token_file` в Corefile,
+- безопасную ротацию токена без хранения в Corefile.
 
 #### 5.1 Генерация токена ZTNET API
 
-1. Войдите в ZTNET под администратором.
-2. Откройте раздел API tokens (или персональные токены доступа).
-3. Создайте отдельный token только для CoreDNS/ztnet-dns.
-4. По возможности выдавайте минимально необходимые права (read-only доступ к членам сети и конфигурации сети).
-5. Скопируйте токен в безопасный буфер — повторно он может не отображаться.
+Сгенерируйте токен в UI ZTNET (API tokens / personal token). После этого передайте его скрипту одним из способов ниже.
 
-#### 5.2 Сохранение токена в `/run/secrets/ztnet_token`
+#### 5.2 Базовая установка токена (аргумент)
 
 ```bash
-sudo install -d -m 0750 /run/secrets
-sudo sh -c 'printf "%s\n" "<ZTNET_API_TOKEN>" > /run/secrets/ztnet_token'
+sudo ./scripts/ztnet-token-setup.sh "<ZTNET_API_TOKEN>"
 ```
 
-#### 5.3 Права на файл секрета (обязательно)
+#### 5.3 Установка токена через stdin
 
 ```bash
-# владелец root, группа сервиса DNS (пример: coredns)
-sudo chown root:coredns /run/secrets/ztnet_token
-
-# чтение только root и группе сервиса
-sudo chmod 0440 /run/secrets/ztnet_token
+printf '%s\\n' "<ZTNET_API_TOKEN>" | sudo ./scripts/ztnet-token-setup.sh
 ```
 
-Если сервис запускается от отдельного пользователя, укажите его группу вместо `coredns`.
+#### 5.4 Интерактивный ввод токена (hidden input)
 
-#### 5.4 Проверка Corefile конфигурации
+```bash
+sudo ./scripts/ztnet-token-setup.sh
+```
 
-Убедитесь, что в блоке `ztnet` указан именно `token_file`:
+#### 5.5 Ротация токена
+
+```bash
+sudo ./scripts/ztnet-token-setup.sh "<NEW_ZTNET_API_TOKEN>" --rotate
+```
+
+#### 5.6 Дополнительные параметры
+
+```bash
+# если Corefile или группа отличаются от дефолта
+sudo ./scripts/ztnet-token-setup.sh "<TOKEN>" \
+  --token-file /run/secrets/ztnet_token \
+  --corefile /etc/coredns/Corefile \
+  --group coredns
+```
+
+По умолчанию скрипт проверяет наличие строки:
 
 ```corefile
 token_file /run/secrets/ztnet_token
 ```
 
-И что **не** используются одновременно `token_env`/`api_token` (должен быть ровно один источник токена).
-
-#### 5.5 Ротация токена без хранения в конфиге
-
-При ротации токена:
-
-```bash
-sudo sh -c 'printf "%s\n" "<NEW_ZTNET_API_TOKEN>" > /run/secrets/ztnet_token'
-sudo chown root:coredns /run/secrets/ztnet_token
-sudo chmod 0440 /run/secrets/ztnet_token
-```
-
-Плагин перечитает токен на следующем refresh-цикле, без необходимости хранить токен в Corefile.
+Если в Corefile указано другое расположение секрета — передайте его через `--token-file`.
 
 ## Development checks
 
