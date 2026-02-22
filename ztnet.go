@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/coredns/coredns/plugin"
-	clog "github.com/coredns/coredns/plugin/pkg/log"
+	clog "github.com/coredns/coredns/plugin/log"
 	"github.com/miekg/dns"
 )
 
