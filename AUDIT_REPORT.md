@@ -16,8 +16,10 @@
 ## АУДИТ 0: Предварительная проверка
 
 - `go test -race -count=1 -timeout=120s ./...` → PASS.
-- `golangci-lint run --out-format=line-number ./...` → команда не поддерживается текущей версией CLI (unknown flag).
+- `golangci-lint run --output.text.path stdout ./...` → PASS (совместимо с golangci-lint v2.x).
 - `golangci-lint run ./...` → `0 issues`.
+
+> Примечание по совместимости: флаг `--out-format` удалён в golangci-lint v2.x. Для v2 используйте `--output.*` флаги (например, `--output.text.path stdout`) или базовый `golangci-lint run ./...`.
 - `git log --all --oneline -S "api_token" -- '*.go' '*.md' Corefile*` → есть исторические коммиты с `api_token`.
 - `govulncheck ./...` (после установки) → обнаружены уязвимости в stdlib и зависимостях (в т.ч. CoreDNS, quic-go).
 
