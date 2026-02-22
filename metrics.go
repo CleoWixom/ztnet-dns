@@ -1,6 +1,7 @@
 package ztnet
 
 import (
+	coremetrics "github.com/coredns/coredns/plugin/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -13,9 +14,10 @@ var (
 )
 
 func init() {
-	prometheus.MustRegister(requestCount)
-	prometheus.MustRegister(refusedCount)
-	prometheus.MustRegister(refreshCount)
-	prometheus.MustRegister(entriesGauge)
-	prometheus.MustRegister(tokenReload)
+	registry := coremetrics.New("")
+	registry.MustRegister(requestCount)
+	registry.MustRegister(refusedCount)
+	registry.MustRegister(refreshCount)
+	registry.MustRegister(entriesGauge)
+	registry.MustRegister(tokenReload)
 }
