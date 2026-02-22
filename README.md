@@ -1,8 +1,21 @@
+> ⚠️ **WIP STATUS: source code for `ztnet-dns` is not published in this repository yet.**
+> This repository is currently documentation-only. Planned source location: this same repository (`main` branch). Target publish window: **Q2 2026**.
+
 > CoreDNS plugin for dynamic A/AAAA resolution of ZeroTier network members via ZTNET API.
 
 [![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](https://go.dev)
 [![CoreDNS](https://img.shields.io/badge/CoreDNS-1.11.x-blue)](https://coredns.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+
+---
+
+## Repository Status
+
+- **Current state:** Documentation-only repository.
+- **Build today:** Not available (no Go source files are currently published).
+- **Test today:** Not available in this repository.
+- **Run today:** Not available in this repository.
+- **Planned source location / ETA:** `https://github.com/CleoWixom/ztnet-dns` (`main` branch), target publication in **Q2 2026**.
 
 ---
 
@@ -57,45 +70,9 @@ Background goroutine: ZTNET API → refresh cache every 30s (atomic swap, zero d
 
 ## Installation
 
-Because CoreDNS compiles plugins at build time, you need to rebuild it with `ztnet-dns` included.
+`ztnet-dns` is not installable from this repository yet because source code and build artifacts are not currently published.
 
-### Option A — Docker (recommended)
-
-```bash
-docker pull ghcr.io/cleoWixom/ztnet-dns:latest
-```
-
-Or build yourself:
-
-```bash
-git clone https://github.com/CleoWixom/ztnet-dns.git
-cd ztnet-dns
-docker build -t ztnet-dns .
-```
-
-### Option B — Build CoreDNS from source
-
-```bash
-git clone https://github.com/coredns/coredns.git
-cd coredns
-
-# Register plugin (position matters: before forward, after errors)
-sed -i '/^forward/i ztnet:github.com/CleoWixom/ztnet-dns' plugin.cfg
-
-go get github.com/CleoWixom/ztnet-dns@latest
-go generate
-CGO_ENABLED=0 go build -ldflags="-s -w" -trimpath -o coredns .
-```
-
-### Option C — Local development (symlink)
-
-```bash
-cd /path/to/coredns/plugin
-ln -s /path/to/ztnet-dns ztnet
-cd ..
-echo "ztnet:ztnet" >> plugin.cfg   # local import path
-go generate && go build
-```
+For now, treat this README as product/design documentation. Installation steps will be added once source is published on `main` (target: Q2 2026).
 
 ---
 
@@ -410,20 +387,9 @@ cause resolution issues. Keep member names DNS-safe: `[a-z0-9-_]+`.
 
 ## Development
 
-```bash
-git clone https://github.com/CleoWixom/ztnet-dns.git
-cd ztnet-dns
-go test ./... -race -v
-go vet ./...
-golangci-lint run
-```
+Development, local builds, tests, and linting are **not runnable yet** from this repository because the implementation files are not published.
 
-To test against a real ZTNET instance:
-```bash
-export ZTNET_API_TOKEN=your-token
-export ZTNET_API_URL=http://localhost:3000
-go test ./... -tags=integration
-```
+When source is published, this section will include the canonical `go test`, `go vet`, and `golangci-lint` commands.
 
 ---
 
