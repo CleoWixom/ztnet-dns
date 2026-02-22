@@ -2,9 +2,11 @@ package ztnet
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coredns/coredns/plugin"
@@ -39,6 +41,18 @@ type ZtnetPlugin struct {
 
 func (p *ZtnetPlugin) Name() string { return "ztnet" }
 
+func isBareName(qname string) bool {
+	return strings.Count(qname, ".") == 1
+}
+
+func buildA(name string, ttl uint32, ip net.IP) *dns.A {
+	return &dns.A{Hdr: dns.RR_Header{Name: name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: ttl}, A: ip.To4()}
+}
+
+func buildAAAA(name string, ttl uint32, ip net.IP) *dns.AAAA {
+	return &dns.AAAA{Hdr: dns.RR_Header{Name: name, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: ttl}, AAAA: ip}
+}
+
 func (p *ZtnetPlugin) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
 	if len(r.Question) == 0 {
 		return dns.RcodeServerFailure, nil
@@ -49,7 +63,8 @@ func (p *ZtnetPlugin) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns
 		return plugin.NextOrFailure(p.Name(), p.Next, ctx, w, r)
 	}
 	src := extractSourceIP(w)
-	if !p.cache.IsAllowed(src) {
+	if !p.cache.IsAllowed(src, p.cfg.StrictStart) {
+		clog.Warningf("ztnet: REFUSED query name=%s type=%d src=%v", qname, q.Qtype, src)
 		m := new(dns.Msg)
 		m.SetReply(r)
 		m.Rcode = dns.RcodeRefused
@@ -62,32 +77,55 @@ func (p *ZtnetPlugin) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns
 	m := new(dns.Msg)
 	m.SetReply(r)
 	m.Authoritative = true
+
+	if q.Qtype == dns.TypeTXT && qname == "_dns-sd._udp."+p.zone && p.cfg.SearchDomain != "" {
+		txt := fmt.Sprintf("path=%s", dns.Fqdn(strings.ToLower(p.cfg.SearchDomain)))
+		m.Answer = append(m.Answer, &dns.TXT{Hdr: dns.RR_Header{Name: qname, Rrtype: dns.TypeTXT, Class: dns.ClassINET, Ttl: p.cfg.TTL}, Txt: []string{txt}})
+		_ = w.WriteMsg(m)
+		requestCount.WithLabelValues(p.zone, dns.RcodeToString[dns.RcodeSuccess]).Inc()
+		return dns.RcodeSuccess, nil
+	}
+
+	lookupName := qname
+	if p.cfg.AllowShort && isBareName(qname) {
+		lookupName = qname[:len(qname)-1] + "." + p.zone
+	}
+	aRecords := p.cache.LookupA(lookupName)
+	aaaaRecords := p.cache.LookupAAAA(lookupName)
+	foundName := len(aRecords) > 0 || len(aaaaRecords) > 0 || q.Qtype == dns.TypeSOA
+
 	switch q.Qtype {
 	case dns.TypeA:
-		for _, ip := range p.cache.LookupA(qname) {
-			m.Answer = append(m.Answer, &dns.A{Hdr: dns.RR_Header{Name: qname, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: p.cfg.TTL}, A: ip})
+		for _, ip := range aRecords {
+			m.Answer = append(m.Answer, buildA(lookupName, p.cfg.TTL, ip))
 		}
 	case dns.TypeAAAA:
-		for _, ip := range p.cache.LookupAAAA(qname) {
-			m.Answer = append(m.Answer, &dns.AAAA{Hdr: dns.RR_Header{Name: qname, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: p.cfg.TTL}, AAAA: ip})
+		for _, ip := range aaaaRecords {
+			m.Answer = append(m.Answer, buildAAAA(lookupName, p.cfg.TTL, ip))
 		}
 	case dns.TypeANY:
-		for _, ip := range p.cache.LookupA(qname) {
-			m.Answer = append(m.Answer, &dns.A{Hdr: dns.RR_Header{Name: qname, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: p.cfg.TTL}, A: ip})
+		for _, ip := range aRecords {
+			m.Answer = append(m.Answer, buildA(lookupName, p.cfg.TTL, ip))
 		}
-		for _, ip := range p.cache.LookupAAAA(qname) {
-			m.Answer = append(m.Answer, &dns.AAAA{Hdr: dns.RR_Header{Name: qname, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: p.cfg.TTL}, AAAA: ip})
+		for _, ip := range aaaaRecords {
+			m.Answer = append(m.Answer, buildAAAA(lookupName, p.cfg.TTL, ip))
 		}
 	case dns.TypeSOA:
 		m.Answer = append(m.Answer, p.soaRecord())
-	case dns.TypeTXT:
-		if qname == "_dns-sd._udp."+p.zone && p.cfg.SearchDomain != "" {
-			txt := fmt.Sprintf("path=%s", dns.Fqdn(strings.ToLower(p.cfg.SearchDomain)))
-			m.Answer = append(m.Answer, &dns.TXT{Hdr: dns.RR_Header{Name: qname, Rrtype: dns.TypeTXT, Class: dns.ClassINET, Ttl: p.cfg.TTL}, Txt: []string{txt}})
-		}
+	default:
+		// unknown type => NOERROR/NODATA for existing name, NXDOMAIN otherwise
 	}
 
 	if len(m.Answer) == 0 {
+		if foundName {
+			m.Rcode = dns.RcodeSuccess
+			_ = w.WriteMsg(m)
+			requestCount.WithLabelValues(p.zone, dns.RcodeToString[dns.RcodeSuccess]).Inc()
+			return dns.RcodeSuccess, nil
+		}
+		if p.cfg.AllowShort && isBareName(qname) {
+			return plugin.NextOrFailure(p.Name(), p.Next, ctx, w, r)
+		}
 		m.Rcode = dns.RcodeNameError
 		m.Ns = append(m.Ns, p.soaRecord())
 		_ = w.WriteMsg(m)
@@ -141,16 +179,36 @@ func (p *ZtnetPlugin) refresh(ctx context.Context) error {
 	tokenReload.WithLabelValues(p.zone, p.cfg.Token.Source, "ok").Inc()
 	ctx, cancel := context.WithTimeout(ctx, p.cfg.Timeout)
 	defer cancel()
-	members, err := p.api.FetchMembers(ctx, token)
-	if err != nil {
+
+	var members []Member
+	var netinfo NetworkInfo
+	var membersErr, netErr error
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		members, membersErr = p.api.FetchMembers(ctx, token)
+	}()
+	go func() {
+		defer wg.Done()
+		netinfo, netErr = p.api.FetchNetwork(ctx, token)
+	}()
+	wg.Wait()
+	if membersErr != nil {
 		refreshCount.WithLabelValues(p.zone, "error").Inc()
-		return err
+		if errors.Is(membersErr, ErrUnauthorized) {
+			clog.Errorf("ztnet: unauthorized against API members endpoint")
+		}
+		return membersErr
 	}
-	netinfo, err := p.api.FetchNetwork(ctx, token)
-	if err != nil {
+	if netErr != nil {
 		refreshCount.WithLabelValues(p.zone, "error").Inc()
-		return err
+		if errors.Is(netErr, ErrUnauthorized) {
+			clog.Errorf("ztnet: unauthorized against API network endpoint")
+		}
+		return netErr
 	}
+
 	a, aaaa := make(map[string][]net.IP), make(map[string][]net.IP)
 	for _, m := range members {
 		names := []string{dns.Fqdn(strings.ToLower(strings.ReplaceAll(m.Name, " ", "_")) + "." + p.zone), dns.Fqdn(strings.ToLower(m.NodeID) + "." + p.zone)}
@@ -161,7 +219,7 @@ func (p *ZtnetPlugin) refresh(ctx context.Context) error {
 			}
 			for _, n := range names {
 				if ip.To4() != nil {
-					a[n] = append(a[n], ip)
+					a[n] = append(a[n], ip.To4())
 				} else {
 					aaaa[n] = append(aaaa[n], ip)
 				}
@@ -171,7 +229,7 @@ func (p *ZtnetPlugin) refresh(ctx context.Context) error {
 	cidrs := append([]string{}, p.cfg.AllowedCIDRs...)
 	if p.cfg.AutoAllowZT {
 		for _, rt := range netinfo.Config.Routes {
-			if rt.Via == nil {
+			if rt.Via == nil && strings.TrimSpace(rt.Target) != "" {
 				cidrs = append(cidrs, rt.Target)
 			}
 		}

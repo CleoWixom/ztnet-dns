@@ -2,7 +2,6 @@ package ztnet
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -37,8 +36,8 @@ func TestCacheSnapshot(t *testing.T) {
 	a := map[string][]net.IP{"a.": {net.ParseIP("10.0.0.1")}}
 	rc.Set(a, nil, mustAllowed(t, "10.0.0.0/8"))
 	a["a."][0] = net.ParseIP("10.0.0.2")
-	if got := rc.LookupA("a.")[0].String(); got != "10.0.0.2" {
-		t.Fatalf("expected current snapshot value, got %s", got)
+	if got := rc.LookupA("a.")[0].String(); got != "10.0.0.1" {
+		t.Fatalf("expected immutable snapshot value, got %s", got)
 	}
 }
 
@@ -52,7 +51,7 @@ func TestCacheConcurrency(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < 200; j++ {
 				_ = rc.LookupA("a.")
-				_ = rc.IsAllowed(net.ParseIP("10.0.0.9"))
+				_ = rc.IsAllowed(net.ParseIP("10.0.0.9"), false)
 			}
 		}()
 	}
@@ -60,7 +59,7 @@ func TestCacheConcurrency(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			rc.Set(map[string][]net.IP{"a.": {net.ParseIP(fmt.Sprintf("10.0.0.%d", i+2))}}, nil, mustAllowed(t, "10.0.0.0/8"))
+			rc.Set(map[string][]net.IP{"a.": {net.ParseIP("10.0.0.2")}}, nil, mustAllowed(t, "10.0.0.0/8"))
 		}(i)
 	}
 	wg.Wait()
@@ -74,11 +73,21 @@ func TestAllowedNets_Contains(t *testing.T) {
 	if a.Contains(net.ParseIP("8.8.8.8")) {
 		t.Fatal("unexpected allowed")
 	}
+	if !a.Contains(net.ParseIP("::ffff:10.10.1.2")) {
+		t.Fatal("expected ipv4-mapped ipv6 to be allowed")
+	}
 }
 
 func TestExtractSourceIP_UDP(t *testing.T) {
 	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("8.8.8.8"), Port: 53}}
 	if got := extractSourceIP(rw).String(); got != "8.8.8.8" {
+		t.Fatal(got)
+	}
+}
+
+func TestExtractSourceIP_TCP(t *testing.T) {
+	rw := &fakeRW{remoteAddr: &net.TCPAddr{IP: net.ParseIP("8.8.4.4"), Port: 53}}
+	if got := extractSourceIP(rw).String(); got != "8.8.4.4" {
 		t.Fatal(got)
 	}
 }
@@ -100,7 +109,7 @@ func (f *fakeRW) Hijack()                   {}
 func basePlugin(t *testing.T) *ZtnetPlugin {
 	rc := NewRecordCache()
 	rc.Set(map[string][]net.IP{"server01.zt.example.com.": {net.ParseIP("10.147.20.5")}}, map[string][]net.IP{"server01.zt.example.com.": {net.ParseIP("fd00::1")}}, mustAllowed(t, "10.147.0.0/16"))
-	return &ZtnetPlugin{zone: "zt.example.com.", cfg: Config{TTL: 60, SearchDomain: "zt.example.com"}, cache: rc, Next: nextOK{}}
+	return &ZtnetPlugin{zone: "zt.example.com.", cfg: Config{TTL: 60, SearchDomain: "zt.example.com.", AllowShort: true}, cache: rc, Next: nextOK{}}
 }
 
 func TestServeDNS_A(t *testing.T) {
@@ -114,6 +123,17 @@ func TestServeDNS_A(t *testing.T) {
 	}
 }
 
+func TestServeDNS_AAAA(t *testing.T) {
+	p := basePlugin(t)
+	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 1111}}
+	req := new(dns.Msg)
+	req.SetQuestion("server01.zt.example.com.", dns.TypeAAAA)
+	rcode, _ := p.ServeDNS(context.Background(), rw, req)
+	if rcode != dns.RcodeSuccess || len(rw.msg.Answer) != 1 {
+		t.Fatalf("rcode=%d ans=%d", rcode, len(rw.msg.Answer))
+	}
+}
+
 func TestServeDNS_NXDOMAIN(t *testing.T) {
 	p := basePlugin(t)
 	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 1111}}
@@ -122,6 +142,17 @@ func TestServeDNS_NXDOMAIN(t *testing.T) {
 	rcode, _ := p.ServeDNS(context.Background(), rw, req)
 	if rcode != dns.RcodeNameError || len(rw.msg.Ns) == 0 {
 		t.Fatal("expected nxdomain+soa")
+	}
+}
+
+func TestServeDNS_UnknownType_NODATA(t *testing.T) {
+	p := basePlugin(t)
+	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 1111}}
+	req := new(dns.Msg)
+	req.SetQuestion("server01.zt.example.com.", dns.TypeSRV)
+	rcode, _ := p.ServeDNS(context.Background(), rw, req)
+	if rcode != dns.RcodeSuccess {
+		t.Fatalf("expected NODATA success, got %d", rcode)
 	}
 }
 
@@ -147,6 +178,17 @@ func TestServeDNS_REFUSED_External(t *testing.T) {
 	}
 }
 
+func TestServeDNS_NilAllowlist_StrictStart(t *testing.T) {
+	p := &ZtnetPlugin{zone: "zt.example.com.", cfg: Config{TTL: 60, StrictStart: true}, cache: NewRecordCache(), Next: nextOK{}}
+	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 1111}}
+	req := new(dns.Msg)
+	req.SetQuestion("server01.zt.example.com.", dns.TypeA)
+	rcode, _ := p.ServeDNS(context.Background(), rw, req)
+	if rcode != dns.RcodeRefused {
+		t.Fatalf("expected refused before first refresh, got %d", rcode)
+	}
+}
+
 func TestLoadToken_FileEnvInline(t *testing.T) {
 	d := t.TempDir()
 	fp := filepath.Join(d, "tok")
@@ -162,6 +204,33 @@ func TestLoadToken_FileEnvInline(t *testing.T) {
 	}
 	if tok, _ := LoadToken(TokenConfig{Source: "inline", Value: " i "}); tok != "i" {
 		t.Fatal(tok)
+	}
+}
+
+func TestLoadToken_HotRotation(t *testing.T) {
+	fp := filepath.Join(t.TempDir(), "tok")
+	if err := os.WriteFile(fp, []byte("a"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t1, err := LoadToken(TokenConfig{Source: TokenSourceFile, Value: fp})
+	if err != nil || t1 != "a" {
+		t.Fatalf("%v %s", err, t1)
+	}
+	if err := os.WriteFile(fp, []byte("b"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t2, err := LoadToken(TokenConfig{Source: TokenSourceFile, Value: fp})
+	if err != nil || t2 != "b" {
+		t.Fatalf("%v %s", err, t2)
+	}
+}
+
+func TestComputeInvalidLengths(t *testing.T) {
+	if _, err := ComputeRFC4193("17d3", "efcc1b0947"); err == nil {
+		t.Fatal("expected networkID length error")
+	}
+	if _, err := Compute6plane("17d395d8cb43a800", "ef"); err == nil {
+		t.Fatal("expected nodeID length error")
 	}
 }
 

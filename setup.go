@@ -3,6 +3,7 @@ package ztnet
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -22,7 +23,13 @@ func setup(c *caddy.Controller) error {
 	if err != nil {
 		return plugin.Error("ztnet", err)
 	}
-	p := &ZtnetPlugin{zone: cfg.Zone, cfg: cfg, cache: NewRecordCache(), api: &APIClient{BaseURL: cfg.APIURL, NetworkID: cfg.NetworkID, HTTPClient: &http.Client{}, MaxRetries: cfg.MaxRetries}}
+	tr := &http.Transport{
+		DialContext:           (&net.Dialer{Timeout: cfg.Timeout / 2}).DialContext,
+		TLSHandshakeTimeout:   cfg.Timeout / 2,
+		ResponseHeaderTimeout: cfg.Timeout,
+		IdleConnTimeout:       90 * time.Second,
+	}
+	p := &ZtnetPlugin{zone: cfg.Zone, cfg: cfg, cache: NewRecordCache(), api: &APIClient{BaseURL: cfg.APIURL, NetworkID: cfg.NetworkID, HTTPClient: &http.Client{Transport: tr, Timeout: cfg.Timeout}, MaxRetries: cfg.MaxRetries}}
 	p.start(context.Background())
 	dnsserver.GetConfig(c).AddPlugin(func(next plugin.Handler) plugin.Handler {
 		p.Next = next
@@ -38,6 +45,7 @@ func setup(c *caddy.Controller) error {
 
 func parse(c *caddy.Controller) (Config, error) {
 	cfg := Config{TTL: 60, Refresh: 30 * time.Second, Timeout: 5 * time.Second, MaxRetries: 3, AutoAllowZT: true}
+	tokenSources := 0
 	for c.Next() {
 		for c.NextBlock() {
 			k := c.Val()
@@ -53,36 +61,60 @@ func parse(c *caddy.Controller) (Config, error) {
 			case "zone":
 				cfg.Zone = dns.Fqdn(strings.ToLower(args[0]))
 			case "token_file":
-				cfg.Token = TokenConfig{Source: "file", Value: args[0]}
+				tokenSources++
+				cfg.Token = TokenConfig{Source: TokenSourceFile, Value: args[0]}
 			case "token_env":
-				cfg.Token = TokenConfig{Source: "env", Value: args[0]}
+				tokenSources++
+				cfg.Token = TokenConfig{Source: TokenSourceEnv, Value: args[0]}
 			case "api_token":
-				cfg.Token = TokenConfig{Source: "inline", Value: args[0]}
+				tokenSources++
+				cfg.Token = TokenConfig{Source: TokenSourceInline, Value: args[0]}
 				clog.Warning("ztnet: using inline api_token is for development only")
 			case "auto_allow_zt":
-				v, _ := strconv.ParseBool(args[0])
+				v, err := strconv.ParseBool(args[0])
+				if err != nil {
+					return cfg, fmt.Errorf("auto_allow_zt parse: %w", err)
+				}
 				cfg.AutoAllowZT = v
 			case "allowed_networks":
-				cfg.AllowedCIDRs = append(cfg.AllowedCIDRs, args[0])
+				cfg.AllowedCIDRs = append(cfg.AllowedCIDRs, args...)
 			case "ttl":
-				v, _ := strconv.Atoi(args[0])
+				v, err := strconv.Atoi(args[0])
+				if err != nil {
+					return cfg, fmt.Errorf("ttl parse: %w", err)
+				}
 				cfg.TTL = uint32(v)
 			case "refresh":
-				v, _ := time.ParseDuration(args[0])
+				v, err := time.ParseDuration(args[0])
+				if err != nil {
+					return cfg, fmt.Errorf("refresh parse: %w", err)
+				}
 				cfg.Refresh = v
 			case "timeout":
-				v, _ := time.ParseDuration(args[0])
+				v, err := time.ParseDuration(args[0])
+				if err != nil {
+					return cfg, fmt.Errorf("timeout parse: %w", err)
+				}
 				cfg.Timeout = v
 			case "max_retries":
-				v, _ := strconv.Atoi(args[0])
+				v, err := strconv.Atoi(args[0])
+				if err != nil {
+					return cfg, fmt.Errorf("max_retries parse: %w", err)
+				}
 				cfg.MaxRetries = v
 			case "strict_start":
-				v, _ := strconv.ParseBool(args[0])
+				v, err := strconv.ParseBool(args[0])
+				if err != nil {
+					return cfg, fmt.Errorf("strict_start parse: %w", err)
+				}
 				cfg.StrictStart = v
 			case "search_domain":
 				cfg.SearchDomain = args[0]
 			case "allow_short_names":
-				v, _ := strconv.ParseBool(args[0])
+				v, err := strconv.ParseBool(args[0])
+				if err != nil {
+					return cfg, fmt.Errorf("allow_short_names parse: %w", err)
+				}
 				cfg.AllowShort = v
 			default:
 				return cfg, fmt.Errorf("unknown option %s", k)
@@ -93,8 +125,12 @@ func parse(c *caddy.Controller) (Config, error) {
 	if cfg.APIURL == "" || cfg.NetworkID == "" || cfg.Zone == "." {
 		return cfg, fmt.Errorf("api_url, network_id and zone are required")
 	}
-	if cfg.Token.Source == "" {
-		return cfg, fmt.Errorf("one token source required")
+	if tokenSources != 1 {
+		return cfg, fmt.Errorf("exactly one token source required")
 	}
+	if cfg.SearchDomain == "" {
+		cfg.SearchDomain = cfg.Zone
+	}
+	cfg.SearchDomain = dns.Fqdn(strings.ToLower(cfg.SearchDomain))
 	return cfg, nil
 }

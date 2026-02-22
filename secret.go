@@ -6,14 +6,22 @@ import (
 	"strings"
 )
 
+const (
+	TokenSourceFile   = "file"
+	TokenSourceEnv    = "env"
+	TokenSourceInline = "inline"
+)
+
+// TokenConfig defines token source and source value.
 type TokenConfig struct {
-	Source string // file|env|inline
+	Source string
 	Value  string
 }
 
+// LoadToken resolves token from file/env/inline config.
 func LoadToken(cfg TokenConfig) (string, error) {
 	switch cfg.Source {
-	case "file":
+	case TokenSourceFile:
 		b, err := os.ReadFile(cfg.Value)
 		if err != nil {
 			return "", fmt.Errorf("token_file read: %w", err)
@@ -23,13 +31,13 @@ func LoadToken(cfg TokenConfig) (string, error) {
 			return "", fmt.Errorf("token_file empty")
 		}
 		return t, nil
-	case "env":
+	case TokenSourceEnv:
 		t := strings.TrimSpace(os.Getenv(cfg.Value))
 		if t == "" {
 			return "", fmt.Errorf("token_env empty: %s", cfg.Value)
 		}
 		return t, nil
-	case "inline":
+	case TokenSourceInline:
 		t := strings.TrimSpace(cfg.Value)
 		if t == "" {
 			return "", fmt.Errorf("api_token empty")

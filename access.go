@@ -8,14 +8,14 @@ import (
 	"github.com/miekg/dns"
 )
 
-// AllowedNets stores allowed source CIDRs.
+// AllowedNets stores source CIDRs allowed to query the plugin zone.
 type AllowedNets struct {
 	nets []*net.IPNet
 }
 
+// NewAllowedNets parses CIDRs and always includes loopback CIDRs.
 func NewAllowedNets(cidrs []string) (*AllowedNets, error) {
 	out := &AllowedNets{nets: make([]*net.IPNet, 0, len(cidrs)+2)}
-	// always allow loopback
 	for _, c := range []string{"127.0.0.0/8", "::1/128"} {
 		_, n, _ := net.ParseCIDR(c)
 		out.nets = append(out.nets, n)
@@ -30,9 +30,13 @@ func NewAllowedNets(cidrs []string) (*AllowedNets, error) {
 	return out, nil
 }
 
+// Contains reports whether ip is present in any allowed CIDR.
 func (a *AllowedNets) Contains(ip net.IP) bool {
 	if a == nil || ip == nil {
 		return false
+	}
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
 	}
 	for _, n := range a.nets {
 		if n.Contains(ip) {
