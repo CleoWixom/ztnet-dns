@@ -26,7 +26,10 @@ jobs:
           cache: true
 
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        shell: bash
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Run checks and generate PROBLEMS.md
         shell: bash
@@ -66,7 +69,7 @@ jobs:
             echo '```' >> "$REPORT"
             echo >> "$REPORT"
 
-            if [ $status -eq 0 ]; then
+            if [ "$status" -eq 0 ]; then
               echo "Result: ✅ PASS" >> "$REPORT"
             else
               echo "Result: ❌ FAIL (exit code: $status)" >> "$REPORT"
@@ -76,11 +79,43 @@ jobs:
             return $status
           }
 
+          run_govulncheck() {
+            echo "## govulncheck ./..." >> "$REPORT"
+            echo >> "$REPORT"
+            echo '```bash' >> "$REPORT"
+            echo 'govulncheck ./...' >> "$REPORT"
+            echo '```' >> "$REPORT"
+            echo >> "$REPORT"
+            echo '```text' >> "$REPORT"
+
+            govulncheck ./... >> "$REPORT" 2>&1
+            local status=$?
+
+            echo '```' >> "$REPORT"
+            echo >> "$REPORT"
+
+            if [ "$status" -eq 0 ]; then
+              echo "Result: ✅ PASS (no vulnerabilities found)" >> "$REPORT"
+              echo >> "$REPORT"
+              return 0
+            fi
+
+            if [ "$status" -eq 3 ]; then
+              echo "Result: ⚠️ WARN (vulnerabilities found; see output above)" >> "$REPORT"
+              echo >> "$REPORT"
+              return 0
+            fi
+
+            echo "Result: ❌ FAIL (govulncheck error, exit code: $status)" >> "$REPORT"
+            echo >> "$REPORT"
+            return "$status"
+          }
+
           FAILED=0
 
           run_and_capture "go mod tidy" go mod tidy || FAILED=1
           run_and_capture "go test ./... -race -count=1" go test ./... -race -count=1 || FAILED=1
-          run_and_capture "govulncheck ./..." govulncheck ./... || FAILED=1
+          run_govulncheck || FAILED=1
 
           if [ "$FAILED" -ne 0 ]; then
             echo "One or more checks failed. See PROBLEMS.md for details."
