@@ -1,0 +1,96 @@
+name: Vulnerability & Health Check
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-vuln:
+    name: go test + govulncheck
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run checks and generate PROBLEMS.md
+        shell: bash
+        run: |
+          set +e
+
+          REPORT="PROBLEMS.md"
+          : > "$REPORT"
+
+          {
+            echo "# Problems Report"
+            echo
+            echo "Generated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo
+            echo "## Environment"
+            echo
+            echo "- Go: $(go version)"
+            echo "- Runner: $RUNNER_OS"
+            echo
+          } >> "$REPORT"
+
+          run_and_capture() {
+            local title="$1"
+            shift
+
+            echo "## ${title}" >> "$REPORT"
+            echo >> "$REPORT"
+            echo '```bash' >> "$REPORT"
+            echo "$*" >> "$REPORT"
+            echo '```' >> "$REPORT"
+            echo >> "$REPORT"
+            echo '```text' >> "$REPORT"
+
+            "$@" >> "$REPORT" 2>&1
+            local status=$?
+
+            echo '```' >> "$REPORT"
+            echo >> "$REPORT"
+
+            if [ $status -eq 0 ]; then
+              echo "Result: ✅ PASS" >> "$REPORT"
+            else
+              echo "Result: ❌ FAIL (exit code: $status)" >> "$REPORT"
+            fi
+            echo >> "$REPORT"
+
+            return $status
+          }
+
+          FAILED=0
+
+          run_and_capture "go mod tidy" go mod tidy || FAILED=1
+          run_and_capture "go test ./... -race -count=1" go test ./... -race -count=1 || FAILED=1
+          run_and_capture "govulncheck ./..." govulncheck ./... || FAILED=1
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo "One or more checks failed. See PROBLEMS.md for details."
+            exit 1
+          fi
+
+      - name: Upload PROBLEMS.md
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: problems-report
+          path: PROBLEMS.md
+          retention-days: 14
