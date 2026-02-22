@@ -50,7 +50,9 @@ func (c *APIClient) getJSON(ctx context.Context, token, path string, out any) er
 			time.Sleep(time.Duration(i+1) * 100 * time.Millisecond)
 			continue
 		}
-		defer resp.Body.Close()
+		defer func() {
+			_ = resp.Body.Close()
+		}()
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			return ErrUnauthorized
 		}
