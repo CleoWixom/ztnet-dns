@@ -5,7 +5,8 @@ CoreDNS external plugin for serving A/AAAA records of **authorized ZeroTier memb
 ## Production readiness status
 
 - ✅ Core behavior is implemented for production use (zone-first routing, stale-on-error cache, atomic allowlist updates).
-- ⚠️ Dependency and runtime security posture must be validated in your target environment (CoreDNS version + Go patch level + periodic `govulncheck`).
+- ✅ Vulnerable CoreDNS line (`v1.11.x`) was replaced with `github.com/coredns/coredns v1.14.0`.
+- ✅ Security scan can be clean when using a patched Go toolchain (validated with Go `1.25.7`).
 
 ## What the plugin does
 
@@ -21,7 +22,7 @@ CoreDNS external plugin for serving A/AAAA records of **authorized ZeroTier memb
 
 ## Requirements
 
-- Go `1.22+` (use latest patched Go release in production).
+- Go `1.24+` (for vulnerability remediation use patched releases, e.g. `1.24.13+` or `1.25.7+`).
 - CoreDNS with plugin compiled in (external plugin workflow).
 - Reachable ZTNET API.
 
@@ -116,7 +117,7 @@ sudo apt-get update
 sudo apt-get install -y git build-essential ca-certificates
 ```
 
-Install Go `1.22+` and ensure `go version` reports a patched release for production environments.
+Install Go `1.24+` and ensure `go version` reports a patched release (recommended: `1.25.7+`).
 
 ### 2) Clone and verify
 
