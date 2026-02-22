@@ -2,11 +2,14 @@ package ztnet
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -251,6 +254,323 @@ func TestFetchMembers_Success(t *testing.T) {
 	ms, err := c.FetchMembers(context.Background(), "t")
 	if err != nil || len(ms) != 1 {
 		t.Fatalf("%v %d", err, len(ms))
+	}
+}
+
+func TestFetchMembers_401(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer ts.Close()
+
+	c := &APIClient{BaseURL: ts.URL, NetworkID: "n", HTTPClient: ts.Client(), MaxRetries: 2}
+	_, err := c.FetchMembers(context.Background(), "t")
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("expected unauthorized, got %v", err)
+	}
+}
+
+func TestFetchMembers_500ThenOK(t *testing.T) {
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/network/n/member" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte(`[{"nodeId":"a","name":"srv","authorized":true,"ipAssignments":["10.0.0.2"]}]`))
+	}))
+	defer ts.Close()
+
+	c := &APIClient{BaseURL: ts.URL, NetworkID: "n", HTTPClient: ts.Client(), MaxRetries: 2}
+	ms, err := c.FetchMembers(context.Background(), "t")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ms) != 1 {
+		t.Fatalf("expected 1 member after retry, got %d", len(ms))
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("expected 2 calls, got %d", calls.Load())
+	}
+}
+
+func TestFetchMembers_Timeout(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(80 * time.Millisecond)
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer ts.Close()
+
+	c := &APIClient{BaseURL: ts.URL, NetworkID: "n", HTTPClient: ts.Client(), MaxRetries: 0}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	_, err := c.FetchMembers(ctx, "t")
+	if err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Fatalf("expected timeout error, got %v", err)
+	}
+}
+
+func TestRefresh_TokenRotation(t *testing.T) {
+	var seenMu sync.Mutex
+	seen := make([]string, 0, 4)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenMu.Lock()
+		seen = append(seen, r.Header.Get("x-ztnet-auth"))
+		seenMu.Unlock()
+		if r.URL.Path == "/api/v1/network/n/member" {
+			_, _ = w.Write([]byte(`[{"nodeId":"a","name":"srv","authorized":true,"ipAssignments":["10.0.0.2"]}]`))
+			return
+		}
+		if r.URL.Path == "/api/v1/network/n" {
+			_, _ = w.Write([]byte(`{"config":{"routes":[{"target":"10.0.0.0/24","via":null}]}}`))
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer ts.Close()
+
+	tf := filepath.Join(t.TempDir(), "tok")
+	if err := os.WriteFile(tf, []byte("tok-a"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := &ZtnetPlugin{zone: "zt.example.com.", cfg: Config{Token: TokenConfig{Source: "file", Value: tf}, Timeout: time.Second}, cache: NewRecordCache(), api: &APIClient{BaseURL: ts.URL, NetworkID: "n", HTTPClient: ts.Client(), MaxRetries: 0}}
+	if err := p.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tf, []byte("tok-b"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	seenMu.Lock()
+	defer seenMu.Unlock()
+	if !slices.Contains(seen, "tok-a") || !slices.Contains(seen, "tok-b") {
+		t.Fatalf("expected both tokens to be used, got %v", seen)
+	}
+}
+
+func TestRefresh_AutoCIDRFromRoutes(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/network/n/member" {
+			_, _ = w.Write([]byte(`[{"nodeId":"a","name":"srv","authorized":true,"ipAssignments":["10.0.0.2"]}]`))
+			return
+		}
+		if r.URL.Path == "/api/v1/network/n" {
+			_, _ = w.Write([]byte(`{"config":{"routes":[{"target":"10.55.0.0/16","via":null}]}}`))
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer ts.Close()
+
+	p := &ZtnetPlugin{zone: "zt.example.com.", cfg: Config{Token: TokenConfig{Source: "inline", Value: "tok"}, Timeout: time.Second, AutoAllowZT: true}, cache: NewRecordCache(), api: &APIClient{BaseURL: ts.URL, NetworkID: "n", HTTPClient: ts.Client(), MaxRetries: 0}}
+	if err := p.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !p.cache.IsAllowed(net.ParseIP("10.55.1.20"), true) {
+		t.Fatal("expected auto route CIDR to be allowed")
+	}
+}
+
+func TestRefresh_SkipsViaRoutes(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/network/n/member" {
+			_, _ = w.Write([]byte(`[{"nodeId":"a","name":"srv","authorized":true,"ipAssignments":["10.0.0.2"]}]`))
+			return
+		}
+		if r.URL.Path == "/api/v1/network/n" {
+			_, _ = w.Write([]byte(`{"config":{"routes":[{"target":"10.77.0.0/16","via":"10.0.0.1"}]}}`))
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer ts.Close()
+
+	p := &ZtnetPlugin{zone: "zt.example.com.", cfg: Config{Token: TokenConfig{Source: "inline", Value: "tok"}, Timeout: time.Second, AutoAllowZT: true}, cache: NewRecordCache(), api: &APIClient{BaseURL: ts.URL, NetworkID: "n", HTTPClient: ts.Client(), MaxRetries: 0}}
+	if err := p.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if p.cache.IsAllowed(net.ParseIP("10.77.1.20"), true) {
+		t.Fatal("expected via route CIDR to be skipped")
+	}
+}
+
+func TestRefresh_StaleAllowedOnBuildError(t *testing.T) {
+	var invalid atomic.Bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/network/n/member" {
+			_, _ = w.Write([]byte(`[{"nodeId":"a","name":"srv","authorized":true,"ipAssignments":["10.0.0.2"]}]`))
+			return
+		}
+		if r.URL.Path == "/api/v1/network/n" {
+			if invalid.Load() {
+				_, _ = w.Write([]byte(`{"config":{"routes":[{"target":"not-cidr","via":null}]}}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"config":{"routes":[{"target":"10.66.0.0/16","via":null}]}}`))
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer ts.Close()
+
+	p := &ZtnetPlugin{zone: "zt.example.com.", cfg: Config{Token: TokenConfig{Source: "inline", Value: "tok"}, Timeout: time.Second, AutoAllowZT: true}, cache: NewRecordCache(), api: &APIClient{BaseURL: ts.URL, NetworkID: "n", HTTPClient: ts.Client(), MaxRetries: 0}}
+	if err := p.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	invalid.Store(true)
+	if err := p.refresh(context.Background()); err == nil {
+		t.Fatal("expected build allowlist error")
+	}
+	if !p.cache.IsAllowed(net.ParseIP("10.66.1.20"), true) {
+		t.Fatal("expected stale allowlist to remain on build error")
+	}
+}
+
+func TestCache_SetIsAllowed_Atomic(t *testing.T) {
+	rc := NewRecordCache()
+	rc.Set(map[string][]net.IP{"srv.": {net.ParseIP("10.0.0.1")}}, nil, mustAllowed(t, "10.0.0.0/24"))
+
+	for i := 0; i < 2000; i++ {
+		if i%2 == 0 {
+			rc.Set(map[string][]net.IP{"srv.": {net.ParseIP("10.0.0.1")}}, nil, mustAllowed(t, "10.0.0.0/24"))
+		} else {
+			rc.Set(map[string][]net.IP{"srv.": {net.ParseIP("10.0.1.1")}}, nil, mustAllowed(t, "10.0.1.0/24"))
+		}
+		s := rc.load()
+		ips := s.a["srv."]
+		if len(ips) == 0 {
+			continue
+		}
+		if s.allowed == nil || !s.allowed.Contains(ips[0]) {
+			t.Fatal("observed non-atomic record/allowlist snapshot")
+		}
+	}
+}
+
+func TestServeDNS_REFUSED_NilSrcIP(t *testing.T) {
+	p := basePlugin(t)
+	rw := &fakeRW{}
+	req := new(dns.Msg)
+	req.SetQuestion("server01.zt.example.com.", dns.TypeA)
+	rcode, _ := p.ServeDNS(context.Background(), rw, req)
+	if rcode != dns.RcodeRefused {
+		t.Fatalf("expected REFUSED for nil src ip, got %d", rcode)
+	}
+}
+
+func TestServeDNS_NilAllowlist_StrictOff(t *testing.T) {
+	p := &ZtnetPlugin{zone: "zt.example.com.", cfg: Config{TTL: 60, StrictStart: false}, cache: NewRecordCache(), Next: nextOK{}}
+	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 1111}}
+	req := new(dns.Msg)
+	req.SetQuestion("missing.zt.example.com.", dns.TypeA)
+	rcode, _ := p.ServeDNS(context.Background(), rw, req)
+	if rcode != dns.RcodeNameError || len(rw.msg.Ns) == 0 {
+		t.Fatalf("expected NXDOMAIN with SOA, got rcode=%d ns=%d", rcode, len(rw.msg.Ns))
+	}
+}
+
+func TestServeDNS_ANY(t *testing.T) {
+	p := basePlugin(t)
+	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 1111}}
+	req := new(dns.Msg)
+	req.SetQuestion("server01.zt.example.com.", dns.TypeANY)
+	rcode, _ := p.ServeDNS(context.Background(), rw, req)
+	if rcode != dns.RcodeSuccess || len(rw.msg.Answer) != 2 {
+		t.Fatalf("expected both A and AAAA answers, got rcode=%d answers=%d", rcode, len(rw.msg.Answer))
+	}
+}
+
+func TestServeDNS_SOA(t *testing.T) {
+	p := basePlugin(t)
+	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 1111}}
+	req := new(dns.Msg)
+	req.SetQuestion("anything.zt.example.com.", dns.TypeSOA)
+	rcode, _ := p.ServeDNS(context.Background(), rw, req)
+	if rcode != dns.RcodeSuccess || len(rw.msg.Answer) != 1 {
+		t.Fatalf("expected SOA answer, got rcode=%d answers=%d", rcode, len(rw.msg.Answer))
+	}
+	if _, ok := rw.msg.Answer[0].(*dns.SOA); !ok {
+		t.Fatalf("expected SOA answer, got %T", rw.msg.Answer[0])
+	}
+}
+
+func TestServeDNS_OutOfZone(t *testing.T) {
+	p := basePlugin(t)
+	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("8.8.8.8"), Port: 1111}}
+	req := new(dns.Msg)
+	req.SetQuestion("google.com.", dns.TypeA)
+	rcode, err := p.ServeDNS(context.Background(), rw, req)
+	if err != nil || rcode != dns.RcodeSuccess {
+		t.Fatalf("expected passthrough success, got rcode=%d err=%v", rcode, err)
+	}
+	if rw.msg != nil {
+		t.Fatal("out-of-zone query should be handled by next plugin")
+	}
+}
+
+func TestServeDNS_NoQuestion(t *testing.T) {
+	p := basePlugin(t)
+	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 1111}}
+	rcode, err := p.ServeDNS(context.Background(), rw, new(dns.Msg))
+	if err != nil || rcode != dns.RcodeServerFailure {
+		t.Fatalf("expected SERVFAIL, got rcode=%d err=%v", rcode, err)
+	}
+}
+
+func TestServeDNS_DNSSD_TXT(t *testing.T) {
+	p := &ZtnetPlugin{zone: "zt.example.com.", cfg: Config{TTL: 60, SearchDomain: "corp.example.com."}, cache: NewRecordCache(), Next: nextOK{}}
+	p.cache.Set(nil, nil, mustAllowed(t, "10.147.0.0/16"))
+	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 1111}}
+	req := new(dns.Msg)
+	req.SetQuestion("_dns-sd._udp.zt.example.com.", dns.TypeTXT)
+	rcode, _ := p.ServeDNS(context.Background(), rw, req)
+	if rcode != dns.RcodeSuccess || len(rw.msg.Answer) != 1 {
+		t.Fatalf("expected TXT answer, got rcode=%d answers=%d", rcode, len(rw.msg.Answer))
+	}
+}
+
+func TestServeDNS_ShortName_Passthrough(t *testing.T) {
+	p := basePlugin(t)
+	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 1111}}
+	req := new(dns.Msg)
+	req.SetQuestion("server01.", dns.TypeA)
+	rcode, err := p.ServeDNS(context.Background(), rw, req)
+	if err != nil || rcode != dns.RcodeSuccess {
+		t.Fatalf("expected passthrough shortname query, got rcode=%d err=%v", rcode, err)
+	}
+	if rw.msg != nil {
+		t.Fatal("shortname out-of-zone query should be handled by next plugin")
+	}
+}
+
+func TestServeDNS_ShortName_MissPassthrough(t *testing.T) {
+	p := basePlugin(t)
+	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 1111}}
+	req := new(dns.Msg)
+	req.SetQuestion("unknown.", dns.TypeA)
+	rcode, err := p.ServeDNS(context.Background(), rw, req)
+	if err != nil || rcode != dns.RcodeSuccess {
+		t.Fatalf("expected passthrough for missing short name, got rcode=%d err=%v", rcode, err)
+	}
+	if rw.msg != nil {
+		t.Fatal("missing short name should pass to next plugin")
+	}
+}
+
+func TestIsBareName(t *testing.T) {
+	if !isBareName("host.") {
+		t.Fatal("expected host. to be bare")
+	}
+	if isBareName("host.zt.example.com.") {
+		t.Fatal("expected fqdn with zone not to be bare")
 	}
 }
 
