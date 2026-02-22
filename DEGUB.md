@@ -26,6 +26,12 @@ To build CoreDNS with embedded `ztnet` plugin:
 make build-coredns
 ```
 
+For full Linux installation (build + binary/config/service/helper install):
+
+```bash
+sudo make install
+```
+
 The resulting binary is placed at:
 
 ```text
@@ -75,6 +81,11 @@ zt.example.com {
     errors
 }
 ```
+
+Note on `zt.example.com { ... }` vs `zone zt.example.com`:
+- `zt.example.com { ... }` is the CoreDNS server block zone routing scope.
+- `zone zt.example.com` is a required `ztnet` plugin parameter.
+- Keep both values identical; this is intentional, not a typo.
 
 ## 4) Token and secret debugging
 

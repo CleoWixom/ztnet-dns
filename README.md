@@ -125,6 +125,12 @@ For Linux systems with `apt`, install required build dependencies via Makefile:
 make install-deps
 ```
 
+If Go is not installed, run:
+
+```bash
+make ensure-go
+```
+
 ### 2) Verify plugin source
 
 ```bash
@@ -153,12 +159,13 @@ Use `Corefile.example` from this repo as a starting point and configure the `ztn
 
 ### 5) Install helper script into system PATH
 
-For manual installs:
+For manual installs, run a full flow:
 
 ```bash
 sudo make install
-# installs to /usr/bin/ztnet.token.install by default
 ```
+
+`make install` performs: `ensure-go`, `verify`, `build-coredns`, binary install (`/usr/sbin/coredns`), config/unit install (`/etc/coredns`, `/lib/systemd/system`), helper install (`/usr/bin/ztnet.token.install`), and service activation.
 
 For package installs (`.deb`), the helper is installed automatically to `/usr/bin/ztnet.token.install`.
 
@@ -177,6 +184,8 @@ The script automates:
 - permission hardening via `chown root:coredns` and `chmod 0440`,
 - `token_file` verification in Corefile,
 - secure token rotation without storing secrets in Corefile.
+
+**About `zt.example.com { ... }` and `zone zt.example.com`:** the first value is the CoreDNS server block zone, while `zone` is an explicit plugin setting required by `ztnet` parser. Keep them identical to avoid confusing behavior and to make configuration intent explicit.
 
 #### 6.1 Generate a ZTNET API token
 
