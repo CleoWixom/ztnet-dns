@@ -51,6 +51,15 @@ contents:
       owner: root
       group: root
 
+
+  # ── Helper script for secure token install/rotation ─────────────────────
+  - src: scripts/ztnet.token.install
+    dst: /usr/bin/ztnet.token.install
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+
   # ── Systemd unit ─────────────────────────────────────────────────────────
   - src: packaging/coredns-ztnet.service
     dst: /lib/systemd/system/coredns-ztnet.service
