@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 var ErrUnauthorized = errors.New("unauthorized")
 
+// Member describes a ZTNET member response object.
 type Member struct {
 	NodeID        string   `json:"nodeId"`
 	Name          string   `json:"name"`
@@ -19,17 +21,20 @@ type Member struct {
 	IPAssignments []string `json:"ipAssignments"`
 }
 
-type Route struct {
+// NetworkRoute describes a route in network config.
+type NetworkRoute struct {
 	Target string  `json:"target"`
 	Via    *string `json:"via"`
 }
 
+// NetworkInfo describes network-level ZTNET information.
 type NetworkInfo struct {
 	Config struct {
-		Routes []Route `json:"routes"`
+		Routes []NetworkRoute `json:"routes"`
 	} `json:"config"`
 }
 
+// APIClient calls ZTNET API endpoints.
 type APIClient struct {
 	BaseURL    string
 	NetworkID  string
@@ -40,8 +45,12 @@ type APIClient struct {
 func (c *APIClient) getJSON(ctx context.Context, token, path string, out any) error {
 	url := strings.TrimRight(c.BaseURL, "/") + path
 	for i := 0; i <= c.MaxRetries; i++ {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return fmt.Errorf("build request %s: %w", path, err)
+		}
 		req.Header.Set("x-ztnet-auth", token)
+
 		resp, err := c.HTTPClient.Do(req)
 		if err != nil {
 			if i == c.MaxRetries {
@@ -50,13 +59,15 @@ func (c *APIClient) getJSON(ctx context.Context, token, path string, out any) er
 			time.Sleep(time.Duration(i+1) * 100 * time.Millisecond)
 			continue
 		}
-		defer func() {
-			_ = resp.Body.Close()
-		}()
+
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
 			return ErrUnauthorized
 		}
 		if resp.StatusCode >= 500 {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
 			if i == c.MaxRetries {
 				return fmt.Errorf("GET %s status %d", path, resp.StatusCode)
 			}
@@ -64,11 +75,15 @@ func (c *APIClient) getJSON(ctx context.Context, token, path string, out any) er
 			continue
 		}
 		if resp.StatusCode >= 400 {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
 			return fmt.Errorf("GET %s status %d", path, resp.StatusCode)
 		}
 		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			_ = resp.Body.Close()
 			return fmt.Errorf("decode %s: %w", path, err)
 		}
+		_ = resp.Body.Close()
 		return nil
 	}
 	return fmt.Errorf("retry loop exhausted")
