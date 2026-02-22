@@ -1,0 +1,65 @@
+# packaging/nfpm.yaml
+# Используется командой: PKG_VERSION=x.y.z nfpm package --config packaging/nfpm.yaml --packager deb
+# Документация: https://nfpm.goreleaser.com/configuration/
+
+name: coredns-ztnet
+arch: amd64
+platform: linux
+version: "${PKG_VERSION}"   # инжектируется из env в CI
+
+maintainer: "CleoWixom <noreply@github.com>"
+description: |
+  CoreDNS with ztnet plugin.
+  Authoritative DNS server for ZeroTier networks via ZTNET REST API.
+  Provides A/AAAA records for ZT members without file writes or restarts.
+vendor: "CleoWixom"
+homepage: "https://github.com/CleoWixom/ztnet-dns"
+license: "Apache-2.0"
+
+# Секция deb — метаданные пакета
+deb:
+  # Compression: xz даёт наименьший размер
+  compression: xz
+  fields:
+    # Пакет заменяет системный coredns если он был установлен
+    Conflicts: coredns
+    Provides: coredns
+
+contents:
+  # ── Бинарь ──────────────────────────────────────────────────────────────
+  - src: /tmp/coredns-bin
+    dst: /usr/sbin/coredns
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+
+  # ── Пример Corefile (config — не перезаписывается при обновлении) ────────
+  - src: Corefile.example
+    dst: /etc/coredns/Corefile
+    type: config|noreplace
+    file_info:
+      mode: 0640
+      owner: root
+      group: root
+
+  # ── Директория для секретов (токен) ─────────────────────────────────────
+  - dst: /etc/coredns/secrets
+    type: dir
+    file_info:
+      mode: 0700
+      owner: root
+      group: root
+
+  # ── Systemd unit ─────────────────────────────────────────────────────────
+  - src: packaging/coredns-ztnet.service
+    dst: /lib/systemd/system/coredns-ztnet.service
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+
+scripts:
+  # postinstall: setcap чтобы слушать на 53 без root, enable + start сервиса
+  postinstall: packaging/scripts/postinstall.sh
+  preremove: packaging/scripts/preremove.sh
