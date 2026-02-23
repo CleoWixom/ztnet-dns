@@ -1,7 +1,7 @@
 ztnet.local {
     bind 192.168.55.1
     ztnet {
-        api_url http://ztnet.local:3000
+        api_url http://127.0.0.1:3000
         network_id 8056c2e21c000001
         zone ztnet.local
         token_file /run/secrets/ztnet_token
