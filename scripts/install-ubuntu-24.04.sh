@@ -6,6 +6,7 @@ DEFAULT_TOKEN_FILE="/run/secrets/ztnet_token"
 DEFAULT_API_URL="http://127.0.0.1:3000"
 DEFAULT_ZONE="zt.local"
 WORKDIR=""
+SUDO=""
 
 log() { printf '[ztnet-install] %s\n' "$*"; }
 warn() { printf '[ztnet-install] WARNING: %s\n' "$*" >&2; }
@@ -41,6 +42,25 @@ prompt_network_id() {
   printf '%s\n' "${input:-$current}"
 }
 
+validate_network_id() {
+  local network_id="$1"
+  [[ "$network_id" =~ ^[0-9a-fA-F]{16}$ ]]
+}
+
+prompt_valid_network_id() {
+  local current="${1:-}"
+  local network_id=""
+  while true; do
+    network_id="$(prompt_network_id "$current")"
+    if validate_network_id "$network_id"; then
+      printf '%s\n' "$network_id"
+      return 0
+    fi
+    warn "NETWORK_ID must be a 16-character hex string (example: 8056c2e21c000001)"
+    current="$network_id"
+  done
+}
+
 prompt_token_file() {
   local current="${1:-$DEFAULT_TOKEN_FILE}"
   read -r -p "TOKEN ZTNET API file [default: ${current}]: " input
@@ -60,13 +80,13 @@ validate_url() {
 read_token_file() {
   local token_file="$1"
 
-  if ! sudo test -f "$token_file"; then
+  if ! ${SUDO} test -f "$token_file"; then
     warn "token file not found: ${token_file}"
     return 1
   fi
 
   local token
-  token="$(sudo sh -c "tr -d '\\r' < '$token_file' | head -n1" 2>/dev/null || true)"
+  token="$(${SUDO} sh -c "tr -d '\\r' < '$token_file' | head -n1" 2>/dev/null || true)"
   if [[ -z "$token" ]]; then
     warn "token file is empty: ${token_file}"
     return 1
@@ -96,10 +116,6 @@ validate_token() {
   esac
 }
 
-if [[ "${EUID}" -eq 0 ]]; then
-  fail "run this script as a regular user with sudo access, not as root"
-fi
-
 if [[ -f /etc/os-release ]]; then
   . /etc/os-release
   if [[ "${ID:-}" != "ubuntu" || "${VERSION_ID:-}" != "24.04" ]]; then
@@ -107,13 +123,19 @@ if [[ -f /etc/os-release ]]; then
   fi
 fi
 
-require_cmd sudo
 require_cmd curl
 require_cmd git
 require_cmd make
 require_cmd rg
 
-sudo -v
+if [[ "${EUID}" -eq 0 ]]; then
+  SUDO=""
+  log "running as root: sudo is not required"
+else
+  require_cmd sudo
+  SUDO="sudo"
+  sudo -v
+fi
 
 TOKEN_FILE_INPUT="$DEFAULT_TOKEN_FILE"
 API_URL="$(prompt_api_url)"
@@ -123,7 +145,7 @@ ZONE="${input:-$DEFAULT_ZONE}"
 [[ -n "$ZONE" ]] || fail "zone cannot be empty"
 
 NETWORK_ID=""
-NETWORK_ID="$(prompt_network_id "$NETWORK_ID")"
+NETWORK_ID="$(prompt_valid_network_id "$NETWORK_ID")"
 
 while true; do
   TOKEN_FILE_INPUT="$(prompt_token_file "$TOKEN_FILE_INPUT")"
@@ -143,7 +165,7 @@ while true; do
       warn "token is invalid (HTTP 401/403). Update token file and try again." ;;
     3)
       warn "network not found (HTTP 404). Check NETWORK_ID and API_URL."
-      NETWORK_ID="$(prompt_network_id "$NETWORK_ID")" ;;
+      NETWORK_ID="$(prompt_valid_network_id "$NETWORK_ID")" ;;
     4)
       warn "failed to connect to API. Check API_URL and connectivity."
       API_URL="$(prompt_api_url)" ;;
@@ -152,11 +174,11 @@ while true; do
   esac
 done
 
-if sudo ss -luntp | rg -q '(:53\s)'; then
+if ${SUDO} ss -luntp | rg -q '(:53\s)'; then
   warn "port 53 is currently in use. Installation may fail until the port is free."
   read -r -p "Attempt to stop systemd-resolved now? [y/N]: " stop_resolved
   if [[ "$stop_resolved" =~ ^[Yy]$ ]]; then
-    sudo systemctl disable --now systemd-resolved || true
+    ${SUDO} systemctl disable --now systemd-resolved || true
   fi
 fi
 
@@ -173,7 +195,7 @@ log "building and installing CoreDNS with ztnet plugin"
 make install
 
 log "writing /etc/coredns/Corefile"
-sudo tee /etc/coredns/Corefile >/dev/null <<CORE
+${SUDO} tee /etc/coredns/Corefile >/dev/null <<CORE
 ${ZONE} {
     ztnet {
         api_url ${API_URL}
@@ -199,15 +221,15 @@ ${ZONE} {
 CORE
 
 log "installing token securely"
-sudo /usr/bin/ztnet.token.install --token-file /run/secrets/ztnet_token --corefile /etc/coredns/Corefile --group coredns "$(sudo sh -c "tr -d '\r' < '$TOKEN_FILE_INPUT' | head -n1")"
+${SUDO} /usr/bin/ztnet.token.install --token-file /run/secrets/ztnet_token --corefile /etc/coredns/Corefile --group coredns "$(${SUDO} sh -c "tr -d '\r' < '$TOKEN_FILE_INPUT' | head -n1")"
 
 log "restarting service"
-sudo systemctl daemon-reload
-sudo systemctl enable --now coredns-ztnet.service
-sudo systemctl restart coredns-ztnet.service
+${SUDO} systemctl daemon-reload
+${SUDO} systemctl enable --now coredns-ztnet.service
+${SUDO} systemctl restart coredns-ztnet.service
 
 log "done"
 log "CoreDNS status:"
-sudo systemctl --no-pager --full status coredns-ztnet.service || true
+${SUDO} systemctl --no-pager --full status coredns-ztnet.service || true
 
 popd >/dev/null
