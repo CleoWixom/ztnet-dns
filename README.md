@@ -272,33 +272,33 @@ golangci-lint run ./...
 
 ## Versioning and lifecycle targets
 
-Use Makefile targets to track plugin build version and lifecycle operations:
+Plugin build version is embedded at compile time from git metadata (`make version`), and automated release tags are created by GitHub Actions.
+
+### Automatic release workflow
+
+Repository includes workflow `.github/workflows/release.yml` with behavior:
+
+- Trigger: `push` to `main` **only** when changed files match `**/*.go`, `go.mod`, or `go.sum`.
+- Before tagging: runs `go test ./...`.
+- Tag format: `v1.2.3`.
+- Default bump: `patch`.
+- Bump control from commit message markers: `#major`, `#minor`, `#patch`.
+- After tag creation: creates GitHub Release with auto-generated changelog.
+
+### How to use
+
+1. Make code changes in `.go` files (or `go.mod` / `go.sum`).
+2. Commit with optional bump marker in commit message:
+   - `#patch` (or no marker) → patch bump,
+   - `#minor` → minor bump,
+   - `#major` → major bump.
+3. Push to `main`.
+4. Workflow runs tests, creates next tag, and publishes GitHub Release automatically.
+
+Examples:
 
 ```bash
-# show effective build version: <base semver>+<git-short-sha>[-dirty]
-make version
-
-# bump base semver in VERSION file when you change functionality
-# bugfix release:  x.y.Z
-make bump-patch
-
-# new backward-compatible feature: x.Y.0
-make bump-minor
-
-# breaking change: X.0.0
-make bump-major
-
-# fast-forward update from repository and reinstall
-make update
-
-# stop/remove coredns-ztnet service, binary, unit and config
-make uninstall
+git commit -m "fix: handle token rotation #patch"
+git commit -m "feat: add dns-sd enhancements #minor"
+git commit -m "refactor!: change API behavior #major"
 ```
-
-Release workflow recommendation:
-1. Implement feature/fix.
-2. Run the proper bump target and commit `VERSION` in the same change.
-3. Build/install (`make install`) so binary gets embedded `PluginVersion` from `VERSION` + git metadata.
-4. Optionally create a git tag matching `VERSION` for external release tracking.
-
-Builds embed version into the plugin via `-ldflags`, and startup log includes the loaded plugin version.
