@@ -27,10 +27,27 @@ CoreDNS external plugin for serving A/AAAA records of **authorized ZeroTier memb
 - Reachable ZTNET API.
 
 ## Configuration
+#### Basic token install (no argument)
+
+1. Run token install
+```bash
+ztnet.token.install 
+```
+2. Input token and enter
 
 ### Corefile example
 
 ```corefile
+. {
+    bind 192.168.55.1
+    hosts {
+        192.168.55.1 ztnet.local
+        fallthrough
+    }
+    forward . 1.1.1.1 8.8.8.8
+    cache
+}
+
 ztnet.local {
     bind 192.168.55.1
     ztnet {
@@ -46,16 +63,6 @@ ztnet.local {
     prometheus :9153
     errors
     log
-}
-
-. {
-    bind 192.168.55.1
-    hosts {
-        192.168.55.1 ztnet.local
-        fallthrough
-    }
-    forward . 1.1.1.1 8.8.8.8
-    cache
 }
 ```
 
