@@ -168,7 +168,7 @@ For manual installs, run a full flow:
 sudo make install
 ```
 
-`make install` performs: `ensure-go`, `check-port`, `verify`, `build-coredns`, binary install (`/usr/sbin/coredns`), config/unit install (`/etc/coredns`, `/lib/systemd/system`), helper install (`/usr/bin/ztnet.token.install`), and service activation.
+`make install` performs: `ensure-go`, `check-port`, `verify`, `build-coredns`, binary install (`/usr/sbin/coredns`), config/unit install (`/etc/coredns`, `/lib/systemd/system`), helper install (`/usr/bin/ztnet.token.install`), service activation, and ZeroTier service compatibility patch (`/usr/sbin/zerotier-one` -> `/usr/sbin/zerotier-one -U`) when `/lib/systemd/system/zerotier-one.service` exists.
 
 For package installs (`.deb`), the helper is installed automatically to `/usr/bin/ztnet.token.install`.
 
@@ -269,3 +269,20 @@ golangci-lint run ./...
 - Avoid `api_token` inline in production; prefer `token_file` or `token_env`.
 - Token is loaded during refresh and is not persisted in plugin state.
 - Keep Go patch version updated (stdlib vulnerabilities are fixed via Go toolchain patch updates).
+
+## Versioning and lifecycle targets
+
+Use Makefile targets to track plugin build version and lifecycle operations:
+
+```bash
+# print plugin version derived from git tags/commit
+make version
+
+# fast-forward update from repository and reinstall
+make update
+
+# stop/remove coredns-ztnet service, binary, unit and config
+make uninstall
+```
+
+Builds embed version into the plugin via `-ldflags`, and startup log includes the loaded plugin version.
