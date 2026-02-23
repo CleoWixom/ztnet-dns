@@ -10,6 +10,12 @@ DESTDIR ?=
 GO ?= go
 GOFLAGS ?=
 PKG ?= ./...
+VERSION_FILE ?= VERSION
+BASE_VERSION ?= $(shell cat $(VERSION_FILE) 2>/dev/null || echo 0.1.0)
+GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo nogit)
+GIT_DIRTY ?= $(shell test -n "$(shell git status --porcelain 2>/dev/null)" && echo -dirty || true)
+VERSION ?= $(BASE_VERSION)+$(GIT_COMMIT)$(GIT_DIRTY)
+LDFLAGS ?= -X github.com/CleoWixom/ztnet-dns.PluginVersion=$(VERSION)
 
 COREDNS_VERSION ?= v1.14.0
 COREDNS_REPO ?= https://github.com/coredns/coredns.git
@@ -22,7 +28,8 @@ DNS_PORT ?= 53
 ZT_INTERFACE_GLOB ?= zt*
 
 .PHONY: help install-deps ensure-go check-port verify-bind-scope tidy test verify build-plugin build-coredns \
-	install install-helper install-binary install-config install-service clean
+	install install-helper install-binary install-config install-service install-zerotier-compat \
+	version bump-patch bump-minor bump-major update uninstall clean
 
 help:
 	@echo "Targets:"
@@ -33,11 +40,28 @@ help:
 	@echo "  tidy           - Run go mod tidy"
 	@echo "  test           - Run tests with race detector"
 	@echo "  verify         - tidy + tests"
+	@echo "  version        - Print plugin version (base + git build metadata)"
+	@echo "  bump-patch     - Increase VERSION patch (x.y.Z) and show new value"
+	@echo "  bump-minor     - Increase VERSION minor (x.Y.0) and show new value"
+	@echo "  bump-major     - Increase VERSION major (X.0.0) and show new value"
 	@echo "  build-plugin   - Compile plugin module packages"
 	@echo "  build-coredns  - Build CoreDNS with ztnet plugin in temp workdir"
 	@echo "  install        - Full Linux install flow (build + install + service)"
+	@echo "  update         - Pull latest repository changes and reinstall"
+	@echo "  uninstall      - Stop service and remove CoreDNS ztnet installation"
 	@echo "  clean          - Remove temporary CoreDNS workdir"
 
+version:
+	@echo "ztnet-dns version: $(VERSION)"
+
+bump-patch:
+	@v=$$(cat "$(VERSION_FILE)" 2>/dev/null || echo 0.1.0); 	IFS=. read -r ma mi pa <<<"$$v"; 	new="$$ma.$$mi.$$((pa+1))"; 	echo "$$new" > "$(VERSION_FILE)"; 	echo "VERSION -> $$new"
+
+bump-minor:
+	@v=$$(cat "$(VERSION_FILE)" 2>/dev/null || echo 0.1.0); 	IFS=. read -r ma mi pa <<<"$$v"; 	new="$$ma.$$((mi+1)).0"; 	echo "$$new" > "$(VERSION_FILE)"; 	echo "VERSION -> $$new"
+
+bump-major:
+	@v=$$(cat "$(VERSION_FILE)" 2>/dev/null || echo 0.1.0); 	IFS=. read -r ma mi pa <<<"$$v"; 	new="$$((ma+1)).0.0"; 	echo "$$new" > "$(VERSION_FILE)"; 	echo "VERSION -> $$new"
 install-deps:
 	sudo apt-get update
 	sudo apt-get install -y git make build-essential ca-certificates curl dnsutils net-tools iproute2
@@ -85,7 +109,7 @@ test:
 verify: tidy test
 
 build-plugin:
-	$(GO) build $(GOFLAGS) $(PKG)
+	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" $(PKG)
 
 build-coredns:
 	rm -rf "$(COREDNS_WORKDIR)"
@@ -96,10 +120,10 @@ build-coredns:
 		$(GO) get "$(PLUGIN_MODULE)" && \
 		$(GO) generate && \
 		$(GO) mod tidy && \
-		CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -o coredns .
+		CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o coredns .
 	@echo "Built CoreDNS binary: $(COREDNS_BIN)"
 
-install: ensure-go check-port verify build-coredns install-binary install-config install-helper install-service
+install: ensure-go check-port verify build-coredns install-binary install-config install-helper install-service install-zerotier-compat
 
 install-binary:
 	install -d "$(DESTDIR)$(SBINDIR)"
@@ -136,5 +160,32 @@ install-service:
 		echo "systemctl not found, skipping service enable/start"; \
 	fi
 
+install-zerotier-compat:
+	@if [ -n "$(DESTDIR)" ]; then \
+		echo "DESTDIR set ($(DESTDIR)) -> skipping zerotier-one.service patch"; \
+		exit 0; \
+	fi
+	@if [ -f "/lib/systemd/system/zerotier-one.service" ]; then \
+		echo "Patching /lib/systemd/system/zerotier-one.service to add -U"; \
+		sudo sed -i 's#\(/usr/sbin/zerotier-one\)\([[:space:]]\|$$\)#\1 -U\2#g' /lib/systemd/system/zerotier-one.service; \
+		sudo systemctl daemon-reload || true; \
+	else \
+		echo "zerotier-one.service not found, skipping"; \
+	fi
+
+update:
+	git pull --ff-only
+	$(MAKE) install
+
+uninstall:
+	@if command -v systemctl >/dev/null 2>&1; then \
+		sudo systemctl disable --now coredns-ztnet.service || true; \
+	fi
+	sudo rm -f "$(SBINDIR)/coredns"
+	sudo rm -f "$(UNITDIR)/coredns-ztnet.service"
+	sudo rm -rf "$(ETCDIR)"
+	@if command -v systemctl >/dev/null 2>&1; then \
+		sudo systemctl daemon-reload || true; \
+	fi
 clean:
 	rm -rf "$(COREDNS_WORKDIR)"
