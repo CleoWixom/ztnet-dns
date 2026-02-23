@@ -31,40 +31,31 @@ CoreDNS external plugin for serving A/AAAA records of **authorized ZeroTier memb
 ### Corefile example
 
 ```corefile
-zt.example.com {
+ztnet.local {
+    bind 192.168.55.1
     ztnet {
-        api_url    http://ztnet.local:3000
+        api_url http://ztnet.local:3000
         network_id 8056c2e21c000001
-        zone       zt.example.com
-
-        # exactly one token source is required
+        zone ztnet.local
         token_file /run/secrets/ztnet_token
-        # token_env  ZTNET_API_TOKEN
-        # api_token  dev-only-inline-token
-
-        auto_allow_zt    true
-        allowed_networks 10.147.0.0/16
-
-        strict_start      false
-        search_domain     zt.example.com
-        allow_short_names false
-
-        ttl         60
-        refresh     30s
-        timeout     5s
-        max_retries 3
+        auto_allow_zt true
+        refresh 30s
+        timeout 5s
+        ttl 60
     }
-
     prometheus :9153
-    log
     errors
+    log
 }
 
 . {
+    bind 192.168.55.1
+    hosts {
+        192.168.55.1 ztnet.local
+        fallthrough
+    }
     forward . 1.1.1.1 8.8.8.8
     cache
-    log
-    errors
 }
 ```
 
