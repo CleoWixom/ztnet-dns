@@ -10,9 +10,12 @@ DESTDIR ?=
 GO ?= go
 GOFLAGS ?=
 PKG ?= ./...
+VERSION_FILE ?= VERSION
+BASE_VERSION ?= $(shell cat $(VERSION_FILE) 2>/dev/null || echo 0.1.0)
+GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo nogit)
+GIT_DIRTY ?= $(shell test -n "$(shell git status --porcelain 2>/dev/null)" && echo -dirty || true)
+VERSION ?= $(BASE_VERSION)+$(GIT_COMMIT)$(GIT_DIRTY)
 LDFLAGS ?= -X github.com/CleoWixom/ztnet-dns.PluginVersion=$(VERSION)
-
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 COREDNS_VERSION ?= v1.14.0
 COREDNS_REPO ?= https://github.com/coredns/coredns.git
@@ -26,7 +29,7 @@ ZT_INTERFACE_GLOB ?= zt*
 
 .PHONY: help install-deps ensure-go check-port verify-bind-scope tidy test verify build-plugin build-coredns \
 	install install-helper install-binary install-config install-service install-zerotier-compat \
-	version update uninstall clean
+	version bump-patch bump-minor bump-major update uninstall clean
 
 help:
 	@echo "Targets:"
@@ -37,7 +40,10 @@ help:
 	@echo "  tidy           - Run go mod tidy"
 	@echo "  test           - Run tests with race detector"
 	@echo "  verify         - tidy + tests"
-	@echo "  version        - Print plugin version"
+	@echo "  version        - Print plugin version (base + git build metadata)"
+	@echo "  bump-patch     - Increase VERSION patch (x.y.Z) and show new value"
+	@echo "  bump-minor     - Increase VERSION minor (x.Y.0) and show new value"
+	@echo "  bump-major     - Increase VERSION major (X.0.0) and show new value"
 	@echo "  build-plugin   - Compile plugin module packages"
 	@echo "  build-coredns  - Build CoreDNS with ztnet plugin in temp workdir"
 	@echo "  install        - Full Linux install flow (build + install + service)"
@@ -48,6 +54,14 @@ help:
 version:
 	@echo "ztnet-dns version: $(VERSION)"
 
+bump-patch:
+	@v=$$(cat "$(VERSION_FILE)" 2>/dev/null || echo 0.1.0); 	IFS=. read -r ma mi pa <<<"$$v"; 	new="$$ma.$$mi.$$((pa+1))"; 	echo "$$new" > "$(VERSION_FILE)"; 	echo "VERSION -> $$new"
+
+bump-minor:
+	@v=$$(cat "$(VERSION_FILE)" 2>/dev/null || echo 0.1.0); 	IFS=. read -r ma mi pa <<<"$$v"; 	new="$$ma.$$((mi+1)).0"; 	echo "$$new" > "$(VERSION_FILE)"; 	echo "VERSION -> $$new"
+
+bump-major:
+	@v=$$(cat "$(VERSION_FILE)" 2>/dev/null || echo 0.1.0); 	IFS=. read -r ma mi pa <<<"$$v"; 	new="$$((ma+1)).0.0"; 	echo "$$new" > "$(VERSION_FILE)"; 	echo "VERSION -> $$new"
 install-deps:
 	sudo apt-get update
 	sudo apt-get install -y git make build-essential ca-certificates curl dnsutils net-tools iproute2

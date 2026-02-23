@@ -275,8 +275,18 @@ golangci-lint run ./...
 Use Makefile targets to track plugin build version and lifecycle operations:
 
 ```bash
-# print plugin version derived from git tags/commit
+# show effective build version: <base semver>+<git-short-sha>[-dirty]
 make version
+
+# bump base semver in VERSION file when you change functionality
+# bugfix release:  x.y.Z
+make bump-patch
+
+# new backward-compatible feature: x.Y.0
+make bump-minor
+
+# breaking change: X.0.0
+make bump-major
 
 # fast-forward update from repository and reinstall
 make update
@@ -284,5 +294,11 @@ make update
 # stop/remove coredns-ztnet service, binary, unit and config
 make uninstall
 ```
+
+Release workflow recommendation:
+1. Implement feature/fix.
+2. Run the proper bump target and commit `VERSION` in the same change.
+3. Build/install (`make install`) so binary gets embedded `PluginVersion` from `VERSION` + git metadata.
+4. Optionally create a git tag matching `VERSION` for external release tracking.
 
 Builds embed version into the plugin via `-ldflags`, and startup log includes the loaded plugin version.
