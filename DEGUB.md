@@ -33,7 +33,7 @@ For full Linux installation (build + binary/config/service/helper install):
 sudo make install
 ```
 
-To inspect port usage and zt* interfaces:
+000To inspect port usage and zt* interfaces:
 
 ```bash
 make check-port
