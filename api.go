@@ -21,6 +21,56 @@ type Member struct {
 	IPAssignments []string `json:"ipAssignments"`
 }
 
+func parseJSONFlexibleString(raw json.RawMessage) (string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return strings.TrimSpace(s), nil
+	}
+	var n json.Number
+	if err := json.Unmarshal(raw, &n); err == nil {
+		return n.String(), nil
+	}
+	return "", fmt.Errorf("unsupported JSON type")
+}
+
+// UnmarshalJSON accepts multiple ZTNET member payload variants.
+func (m *Member) UnmarshalJSON(data []byte) error {
+	var aux struct {
+		NodeIDCamel   json.RawMessage `json:"nodeId"`
+		NodeIDLower   json.RawMessage `json:"nodeid"`
+		ID            json.RawMessage `json:"id"`
+		Address       json.RawMessage `json:"address"`
+		Name          string          `json:"name"`
+		Authorized    bool            `json:"authorized"`
+		IPAssignments []string        `json:"ipAssignments"`
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	m.Name = aux.Name
+	m.Authorized = aux.Authorized
+	m.IPAssignments = aux.IPAssignments
+
+	candidates := []json.RawMessage{aux.NodeIDCamel, aux.NodeIDLower, aux.ID, aux.Address}
+	for _, raw := range candidates {
+		v, err := parseJSONFlexibleString(raw)
+		if err != nil {
+			return fmt.Errorf("member node id decode: %w", err)
+		}
+		if v != "" {
+			m.NodeID = v
+			return nil
+		}
+	}
+
+	m.NodeID = ""
+	return nil
+}
+
 // NetworkRoute describes a route in network config.
 type NetworkRoute struct {
 	Target string  `json:"target"`

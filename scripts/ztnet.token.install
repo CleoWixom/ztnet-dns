@@ -30,7 +30,24 @@ USAGE
 }
 
 log() { printf '[ztnet-token] %s\n' "$*"; }
+warn() { printf '[ztnet-token] WARNING: %s\n' "$*" >&2; }
 fail() { printf '[ztnet-token] ERROR: %s\n' "$*" >&2; exit 1; }
+
+ensure_default_identity() {
+  if ! getent group coredns >/dev/null; then
+    warn "group 'coredns' does not exist, creating system group"
+    groupadd --system coredns
+  fi
+
+  if ! getent passwd coredns >/dev/null; then
+    warn "user 'coredns' does not exist, creating system user"
+    if command -v nologin >/dev/null 2>&1; then
+      useradd --system --gid coredns --home-dir /nonexistent --shell "$(command -v nologin)" coredns
+    else
+      useradd --system --gid coredns --home-dir /nonexistent --shell /bin/false coredns
+    fi
+  fi
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -83,7 +100,11 @@ fi
 [[ -n "$TOKEN" ]] || fail "empty token"
 
 if ! getent group "$GROUP_NAME" >/dev/null; then
-  fail "group '${GROUP_NAME}' does not exist"
+  if [[ "$GROUP_NAME" == "coredns" ]]; then
+    ensure_default_identity
+  else
+    fail "group '${GROUP_NAME}' does not exist"
+  fi
 fi
 
 TOKEN_DIR=$(dirname "$TOKEN_FILE")
@@ -102,7 +123,7 @@ log "Token ${MODE} completed: ${TOKEN_FILE}"
 log "Owner/perm set to root:${GROUP_NAME} and 0440"
 
 if [[ -f "$CORE_FILE" ]]; then
-  if rg -n "^[[:space:]]*token_file[[:space:]]+${TOKEN_FILE//\//\/}[[:space:]]*$" "$CORE_FILE" >/dev/null; then
+  if grep -En "^[[:space:]]*token_file[[:space:]]+${TOKEN_FILE//\//\/}[[:space:]]*$" "$CORE_FILE" >/dev/null; then
     log "Corefile check passed: token_file ${TOKEN_FILE}"
   else
     fail "Corefile check failed: '${CORE_FILE}' does not contain exact line: token_file ${TOKEN_FILE}"

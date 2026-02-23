@@ -257,6 +257,29 @@ func TestFetchMembers_Success(t *testing.T) {
 	}
 }
 
+func TestFetchMembers_NodeIDNumberAndLowercaseField(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/network/n/member" {
+			_, _ = w.Write([]byte(`[{"nodeid":2,"id":"abcdef01235","name":"srv","authorized":true,"ipAssignments":["10.0.0.2"]}]`))
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer ts.Close()
+
+	c := &APIClient{BaseURL: ts.URL, NetworkID: "n", HTTPClient: ts.Client(), MaxRetries: 1}
+	ms, err := c.FetchMembers(context.Background(), "t")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ms) != 1 {
+		t.Fatalf("expected 1 member, got %d", len(ms))
+	}
+	if ms[0].NodeID != "2" {
+		t.Fatalf("expected nodeID 2, got %q", ms[0].NodeID)
+	}
+}
+
 func TestFetchMembers_401(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
