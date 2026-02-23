@@ -18,13 +18,18 @@ COREDNS_BIN ?= $(COREDNS_WORKDIR)/coredns
 PLUGIN_MODULE ?= github.com/CleoWixom/ztnet-dns
 PLUGIN_DIR ?= $(CURDIR)
 
-.PHONY: help install-deps ensure-go tidy test verify build-plugin build-coredns \
+DNS_PORT ?= 53
+ZT_INTERFACE_GLOB ?= zt*
+
+.PHONY: help install-deps ensure-go check-port verify-bind-scope tidy test verify build-plugin build-coredns \
 	install install-helper install-binary install-config install-service clean
 
 help:
 	@echo "Targets:"
 	@echo "  install-deps   - Install required Linux packages (apt-based systems)"
 	@echo "  ensure-go      - Install Go toolchain if missing (apt-based systems)"
+	@echo "  check-port     - Check if DNS port is already occupied"
+	@echo "  verify-bind-scope - Show listeners on :53 and zt* interfaces (manual policy check)"
 	@echo "  tidy           - Run go mod tidy"
 	@echo "  test           - Run tests with race detector"
 	@echo "  verify         - tidy + tests"
@@ -35,7 +40,7 @@ help:
 
 install-deps:
 	sudo apt-get update
-	sudo apt-get install -y git make build-essential ca-certificates curl dnsutils
+	sudo apt-get install -y git make build-essential ca-certificates curl dnsutils net-tools iproute2
 
 ensure-go:
 	@if command -v $(GO) >/dev/null 2>&1; then \
@@ -46,6 +51,30 @@ ensure-go:
 		sudo apt-get install -y golang; \
 		echo "Installed: $$($(GO) version)"; \
 	fi
+
+
+check-port:
+	@echo "Checking port $(DNS_PORT) listeners..."
+	@if netstat -lntup 2>/dev/null | rg -q "[:.]$(DNS_PORT)\s"; then \
+		echo "WARNING: port $(DNS_PORT) is already in use:"; \
+		netstat -lntup 2>/dev/null | rg "[:.]$(DNS_PORT)\s" || true; \
+		exit 1; \
+	else \
+		echo "OK: port $(DNS_PORT) is free"; \
+	fi
+
+verify-bind-scope:
+	@echo "Inspecting active listeners on :$(DNS_PORT)..."
+	@netstat -lntup 2>/dev/null | rg "[:.]$(DNS_PORT)\s" || echo "No active listeners on :$(DNS_PORT)"
+	@echo "Known zt* interfaces:"
+	@if command -v ip >/dev/null 2>&1; then \
+		ip -o link show | awk -F': ' '{print $$2}' | rg '^$(ZT_INTERFACE_GLOB)$$' || echo "No zt* interface found"; \
+	elif command -v ifconfig >/dev/null 2>&1; then \
+		ifconfig -a | awk -F: '/^[a-zA-Z0-9_-]+:/{print $$1}' | rg '^$(ZT_INTERFACE_GLOB)$$' || echo "No zt* interface found"; \
+	else \
+		echo "Neither ip nor ifconfig found"; \
+	fi
+	@echo "NOTE: Binding policy (only ZT or all interfaces) is controlled by CoreDNS listen/bind directives in Corefile."
 
 tidy:
 	$(GO) mod tidy
@@ -70,7 +99,7 @@ build-coredns:
 		CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -o coredns .
 	@echo "Built CoreDNS binary: $(COREDNS_BIN)"
 
-install: ensure-go verify build-coredns install-binary install-config install-helper install-service
+install: ensure-go check-port verify build-coredns install-binary install-config install-helper install-service
 
 install-binary:
 	install -d "$(DESTDIR)$(SBINDIR)"

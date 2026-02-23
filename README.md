@@ -137,6 +137,18 @@ make ensure-go
 make verify
 ```
 
+Check that DNS port 53 is free before install/start:
+
+```bash
+make check-port
+```
+
+If you need to inspect existing listeners and ZT interfaces:
+
+```bash
+make verify-bind-scope
+```
+
 ### 3) Build plugin packages (repository local)
 
 ```bash
@@ -165,7 +177,7 @@ For manual installs, run a full flow:
 sudo make install
 ```
 
-`make install` performs: `ensure-go`, `verify`, `build-coredns`, binary install (`/usr/sbin/coredns`), config/unit install (`/etc/coredns`, `/lib/systemd/system`), helper install (`/usr/bin/ztnet.token.install`), and service activation.
+`make install` performs: `ensure-go`, `check-port`, `verify`, `build-coredns`, binary install (`/usr/sbin/coredns`), config/unit install (`/etc/coredns`, `/lib/systemd/system`), helper install (`/usr/bin/ztnet.token.install`), and service activation.
 
 For package installs (`.deb`), the helper is installed automatically to `/usr/bin/ztnet.token.install`.
 
@@ -186,6 +198,8 @@ The script automates:
 - secure token rotation without storing secrets in Corefile.
 
 **About `zt.example.com { ... }` and `zone zt.example.com`:** the first value is the CoreDNS server block zone, while `zone` is an explicit plugin setting required by `ztnet` parser. Keep them identical to avoid confusing behavior and to make configuration intent explicit.
+
+To expose DNS only on ZeroTier interfaces, configure CoreDNS `bind`/`listen` directives for your `zt*` interfaces in Corefile.
 
 #### 6.1 Generate a ZTNET API token
 

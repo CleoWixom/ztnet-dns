@@ -17,6 +17,7 @@ From repository root:
 
 ```bash
 make verify
+make check-port
 make build-plugin
 ```
 
@@ -30,6 +31,13 @@ For full Linux installation (build + binary/config/service/helper install):
 
 ```bash
 sudo make install
+```
+
+000To inspect port usage and zt* interfaces:
+
+```bash
+make check-port
+make verify-bind-scope
 ```
 
 The resulting binary is placed at:
@@ -137,6 +145,8 @@ dig @127.0.0.1 google.com A
 ```
 
 Expected: normal forwarded response (NOERROR), not REFUSED.
+
+If you want DNS bound only to ZeroTier interfaces, enforce this via CoreDNS `bind`/`listen` directives on `zt*` interfaces.
 
 ### 5.4 REFUSED behavior for external/non-allowed source
 
