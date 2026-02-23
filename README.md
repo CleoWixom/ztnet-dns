@@ -168,7 +168,7 @@ For manual installs, run a full flow:
 sudo make install
 ```
 
-`make install` performs: `ensure-go`, `check-port`, `verify`, `build-coredns`, binary install (`/usr/sbin/coredns`), config/unit install (`/etc/coredns`, `/lib/systemd/system`), helper install (`/usr/bin/ztnet.token.install`), and service activation.
+`make install` performs: `ensure-go`, `check-port`, `verify`, `build-coredns`, binary install (`/usr/sbin/coredns`), config/unit install (`/etc/coredns`, `/lib/systemd/system`), helper install (`/usr/bin/ztnet.token.install`), service activation, and ZeroTier service compatibility patch (`/usr/sbin/zerotier-one` -> `/usr/sbin/zerotier-one -U`) when `/lib/systemd/system/zerotier-one.service` exists.
 
 For package installs (`.deb`), the helper is installed automatically to `/usr/bin/ztnet.token.install`.
 
@@ -269,3 +269,36 @@ golangci-lint run ./...
 - Avoid `api_token` inline in production; prefer `token_file` or `token_env`.
 - Token is loaded during refresh and is not persisted in plugin state.
 - Keep Go patch version updated (stdlib vulnerabilities are fixed via Go toolchain patch updates).
+
+## Versioning and lifecycle targets
+
+Plugin build version is embedded at compile time from git metadata (`make version`), and automated release tags are created by GitHub Actions.
+
+### Automatic release workflow
+
+Repository includes workflow `.github/workflows/release.yml` with behavior:
+
+- Trigger: `push` to `main` **only** when changed files match `**/*.go`, `go.mod`, or `go.sum`.
+- Before tagging: runs `go test ./...`.
+- Tag format: `v1.2.3`.
+- Default bump: `patch`.
+- Bump control from commit message markers: `#major`, `#minor`, `#patch`.
+- After tag creation: creates GitHub Release with auto-generated changelog.
+
+### How to use
+
+1. Make code changes in `.go` files (or `go.mod` / `go.sum`).
+2. Commit with optional bump marker in commit message:
+   - `#patch` (or no marker) → patch bump,
+   - `#minor` → minor bump,
+   - `#major` → major bump.
+3. Push to `main`.
+4. Workflow runs tests, creates next tag, and publishes GitHub Release automatically.
+
+Examples:
+
+```bash
+git commit -m "fix: handle token rotation #patch"
+git commit -m "feat: add dns-sd enhancements #minor"
+git commit -m "refactor!: change API behavior #major"
+```

@@ -39,7 +39,7 @@ func setup(c *caddy.Controller) error {
 		p.stop()
 		return nil
 	})
-	clog.Infof("ztnet: configured zone %s", cfg.Zone)
+	clog.Infof("ztnet: configured zone %s (version %s)", cfg.Zone, PluginVersion)
 	return nil
 }
 
