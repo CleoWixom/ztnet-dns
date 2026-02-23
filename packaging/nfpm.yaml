@@ -53,8 +53,8 @@ contents:
 
 
   # ── Helper script for secure token install/rotation ─────────────────────
-  - src: scripts/ztnet.token.install
-    dst: /usr/bin/ztnet.token.install
+  - src: scripts/ztnetool
+    dst: /usr/bin/ztnetool
     file_info:
       mode: 0755
       owner: root

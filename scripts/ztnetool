@@ -1,0 +1,235 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+TOKEN_FILE="/run/secrets/ztnet_token"
+CORE_FILE="/etc/coredns/Corefile"
+GROUP_NAME="coredns"
+API_URL="${API_URL:-http://127.0.0.1:3000}"
+NETWORK_ID="${NETWORK_ID:-}"
+NODE_OR_NETWORK=""
+ACTION=""
+TOKEN_INPUT=""
+
+if [[ -t 1 ]]; then
+  C_RESET='\033[0m'; C_RED='\033[31m'; C_GREEN='\033[32m'; C_YELLOW='\033[33m'; C_BLUE='\033[34m'; C_CYAN='\033[36m'; C_BOLD='\033[1m'
+else
+  C_RESET=''; C_RED=''; C_GREEN=''; C_YELLOW=''; C_BLUE=''; C_CYAN=''; C_BOLD=''
+fi
+
+info() { printf "%b[i]%b %s\n" "$C_BLUE" "$C_RESET" "$*"; }
+ok() { printf "%b[✓]%b %s\n" "$C_GREEN" "$C_RESET" "$*"; }
+warn() { printf "%b[!]%b %s\n" "$C_YELLOW" "$C_RESET" "$*" >&2; }
+err() { printf "%b[x]%b %s\n" "$C_RED" "$C_RESET" "$*" >&2; }
+die() { err "$*"; exit 1; }
+
+usage() {
+  cat <<USAGE
+${C_BOLD}ztnetool${C_RESET} [option]
+
+${C_BOLD}Options:${C_RESET}
+  -t "<token>"      Установка токена в ${TOKEN_FILE}
+                    Если токен после -t не указан, будет интерактивный ввод
+  -c                Проверка установленного токена и API доступности
+  -l                Получение доступных контроллеров (сетей)
+  -n <id>           Получение информации о сети и подключенных клиентах
+                    (<network_id> или <node_id>)
+
+${C_BOLD}Additional:${C_RESET}
+  --api-url URL     API URL (default: ${API_URL})
+  --token-file PATH Token path (default: ${TOKEN_FILE})
+  --corefile PATH   CoreDNS Corefile path (default: ${CORE_FILE})
+  -h, --help        Show help
+USAGE
+}
+
+ensure_group_and_user() {
+  if ! getent group "$GROUP_NAME" >/dev/null; then
+    info "Создаю системную группу ${GROUP_NAME}"
+    groupadd --system "$GROUP_NAME"
+  fi
+
+  if ! getent passwd "$GROUP_NAME" >/dev/null; then
+    info "Создаю системного пользователя ${GROUP_NAME}"
+    local shell_path="/usr/sbin/nologin"
+    [[ -x "$shell_path" ]] || shell_path="/bin/false"
+    useradd --system --gid "$GROUP_NAME" --home-dir /nonexistent --shell "$shell_path" "$GROUP_NAME"
+  fi
+}
+
+extract_network_id_from_corefile() {
+  [[ -f "$CORE_FILE" ]] || return 1
+  awk '/^[[:space:]]*network_id[[:space:]]+/ {print $2; exit}' "$CORE_FILE"
+}
+
+read_token_from_file() {
+  [[ -f "$TOKEN_FILE" ]] || return 1
+  tr -d '\r' < "$TOKEN_FILE" | head -n1
+}
+
+prompt_token() {
+  local token="${1:-}"
+  if [[ -z "$token" ]]; then
+    printf "%b" "${C_CYAN}Введите ZTNET API token:${C_RESET} " >&2
+    read -r -s token
+    printf '\n' >&2
+  fi
+  [[ -n "$token" ]] || die "Пустой токен недопустим"
+  printf '%s' "$token"
+}
+
+write_token() {
+  local token="$1"
+  local token_dir
+  token_dir="$(dirname "$TOKEN_FILE")"
+
+  install -d -m 0750 "$token_dir"
+  local tmp
+  tmp="$(mktemp "${TOKEN_FILE}.tmp.XXXXXX")"
+  trap 'rm -f "$tmp"' EXIT
+  printf '%s\n' "$token" > "$tmp"
+  chown root:"$GROUP_NAME" "$tmp"
+  chmod 0440 "$tmp"
+  mv -f "$tmp" "$TOKEN_FILE"
+  trap - EXIT
+
+  ok "Токен сохранен: ${TOKEN_FILE} (root:${GROUP_NAME}, 0440)"
+}
+
+api_get() {
+  local path="$1"
+  local token="$2"
+  curl -sS --connect-timeout 5 --max-time 20 -H "x-ztnet-auth: ${token}" "${API_URL%/}${path}"
+}
+
+check_token_and_api() {
+  local token="$1"
+  local network_id="$2"
+  [[ -n "$network_id" ]] || die "Не указан NETWORK_ID (через --network-id/env/Corefile)"
+
+  local status
+  status="$(curl -sS -o /tmp/ztnetool.check.out -w '%{http_code}' --connect-timeout 5 --max-time 20 \
+    -H "x-ztnet-auth: ${token}" "${API_URL%/}/api/v1/network/${network_id}" || true)"
+
+  case "$status" in
+    200) ok "Токен валиден, API доступен, сеть ${network_id} найдена" ;;
+    401|403) die "Токен невалиден (HTTP ${status})" ;;
+    404) die "Сеть ${network_id} не найдена (HTTP 404)" ;;
+    000) die "Нет связи с API (${API_URL})" ;;
+    *) die "Неожиданный ответ API: HTTP ${status}" ;;
+  esac
+}
+
+list_controllers() {
+  local token="$1"
+  info "Получаю список сетей..."
+  local body
+  if body="$(api_get "/api/v1/network" "$token" 2>/dev/null)"; then
+    printf '%s\n' "$body"
+    ok "Список сетей получен"
+    return 0
+  fi
+
+  warn "Endpoint /api/v1/network недоступен, пробую /api/v1/controller/network"
+  body="$(api_get "/api/v1/controller/network" "$token")"
+  printf '%s\n' "$body"
+  ok "Список контроллеров/сетей получен"
+}
+
+show_network_or_node() {
+  local token="$1"
+  local id="$2"
+  [[ -n "$id" ]] || die "Для -n укажите network_id или node_id"
+
+  if [[ "$id" =~ ^[0-9a-fA-F]{16}$ ]]; then
+    info "Информация по сети ${id}"
+    printf "%b\n" "${C_BOLD}--- Network ---${C_RESET}"
+    api_get "/api/v1/network/${id}" "$token" || die "Ошибка получения сети ${id}"
+    printf "\n%b\n" "${C_BOLD}--- Members ---${C_RESET}"
+    api_get "/api/v1/network/${id}/member" "$token" || die "Ошибка получения клиентов сети ${id}"
+    return 0
+  fi
+
+  local network_id="${NETWORK_ID:-$(extract_network_id_from_corefile || true)}"
+  [[ -n "$network_id" ]] || die "Для node_id нужен NETWORK_ID (через env NETWORK_ID или Corefile)"
+  info "Поиск node_id=${id} в сети ${network_id}"
+  api_get "/api/v1/network/${network_id}/member" "$token" | awk -v needle="$id" '
+    BEGIN{found=0}
+    {print}
+    index(tolower($0), tolower(needle))>0 {found=1}
+    END{if(found==0) exit 10}
+  ' || die "node_id ${id} не найден или API недоступен"
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -t)
+      ACTION="set-token"
+      if [[ $# -ge 2 && ! "$2" =~ ^- ]]; then TOKEN_INPUT="$2"; shift; fi
+      ;;
+    -c) ACTION="check" ;;
+    -l) ACTION="list" ;;
+    -n)
+      ACTION="network"
+      [[ $# -ge 2 ]] || die "-n требует аргумент"
+      NODE_OR_NETWORK="$2"
+      shift
+      ;;
+    --api-url)
+      [[ $# -ge 2 ]] || die "--api-url требует аргумент"
+      API_URL="$2"
+      shift
+      ;;
+    --network-id)
+      [[ $# -ge 2 ]] || die "--network-id требует аргумент"
+      NETWORK_ID="$2"
+      shift
+      ;;
+    --token-file)
+      [[ $# -ge 2 ]] || die "--token-file требует аргумент"
+      TOKEN_FILE="$2"
+      shift
+      ;;
+    --corefile)
+      [[ $# -ge 2 ]] || die "--corefile требует аргумент"
+      CORE_FILE="$2"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *) die "Неизвестный аргумент: $1" ;;
+  esac
+  shift
+done
+
+[[ -n "$ACTION" ]] || { usage; exit 1; }
+[[ "$EUID" -eq 0 ]] || die "Запустите с root/sudo"
+
+ensure_group_and_user
+
+if [[ -z "$NETWORK_ID" ]]; then
+  NETWORK_ID="$(extract_network_id_from_corefile || true)"
+fi
+
+case "$ACTION" in
+  set-token)
+    token="$(prompt_token "$TOKEN_INPUT")"
+    write_token "$token"
+    ;;
+  check)
+    token="$(read_token_from_file || true)"
+    [[ -n "$token" ]] || die "Токен не найден в ${TOKEN_FILE}"
+    check_token_and_api "$token" "$NETWORK_ID"
+    ;;
+  list)
+    token="$(read_token_from_file || true)"
+    [[ -n "$token" ]] || die "Токен не найден в ${TOKEN_FILE}"
+    list_controllers "$token"
+    ;;
+  network)
+    token="$(read_token_from_file || true)"
+    [[ -n "$token" ]] || die "Токен не найден в ${TOKEN_FILE}"
+    show_network_or_node "$token" "$NODE_OR_NETWORK"
+    ;;
+esac
