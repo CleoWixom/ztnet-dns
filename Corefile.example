@@ -1,8 +1,9 @@
-zt.example.com {
+ztnet.local {
+    bind 192.168.55.1
     ztnet {
         api_url http://ztnet.local:3000
         network_id 8056c2e21c000001
-        zone zt.example.com
+        zone ztnet.local
         token_file /run/secrets/ztnet_token
         auto_allow_zt true
         refresh 30s
@@ -15,7 +16,11 @@ zt.example.com {
 }
 
 . {
-    bind 10.147.20.1
+    bind 192.168.55.1
+    hosts {
+        192.168.55.1 ztnet.local
+        fallthrough
+    }
     forward . 1.1.1.1 8.8.8.8
     cache
 }

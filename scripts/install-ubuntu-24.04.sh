@@ -126,7 +126,6 @@ fi
 require_cmd curl
 require_cmd git
 require_cmd make
-require_cmd rg
 
 if [[ "${EUID}" -eq 0 ]]; then
   SUDO=""
@@ -174,7 +173,7 @@ while true; do
   esac
 done
 
-if ${SUDO} ss -luntp | rg -q '(:53\s)'; then
+if ${SUDO} ss -luntp | grep -Eq '(:53\s)'; then
   warn "port 53 is currently in use. Installation may fail until the port is free."
   read -r -p "Attempt to stop systemd-resolved now? [y/N]: " stop_resolved
   if [[ "$stop_resolved" =~ ^[Yy]$ ]]; then
