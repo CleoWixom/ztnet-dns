@@ -11,8 +11,8 @@ permissions:
   contents: write   # для создания release и загрузки артефактов
 
 env:
-  GO_VERSION: "1.22"
-  COREDNS_VERSION: "v1.11.3"
+  GO_VERSION: "1.25.7"
+  COREDNS_VERSION: "v1.14.0"
   PLUGIN_MODULE: "github.com/CleoWixom/ztnet-dns"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -23,7 +23,7 @@ jobs:
 #
 # CoreDNS плагины тестируются прямо в репозитории плагина.
 # CoreDNS приходит как обычная Go-зависимость через go.mod:
-#   require github.com/coredns/coredns v1.11.3
+#   require github.com/coredns/coredns v1.14.0
 #
 # В тестах используются:
 #   dnstest.NewRecorder(&test.ResponseWriter{})  ← mock DNS writer
@@ -139,7 +139,7 @@ jobs:
 # JOB 2 — Сборка CoreDNS с плагином + упаковка в .deb (Ubuntu 24.04 amd64)
 #
 # Схема:
-#   1. Клонируем CoreDNS v1.11.3
+#   1. Клонируем CoreDNS v1.14.0
 #   2. Вставляем строку "ztnet:..." в plugin.cfg перед forward
 #   3. go get <plugin>@<версия>  — подтягиваем код плагина
 #   4. go generate               — регенерирует zplugin.go (список плагинов)
