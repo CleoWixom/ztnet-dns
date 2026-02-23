@@ -247,6 +247,25 @@ token_file /run/secrets/ztnet_token
 
 If your Corefile uses a different token path, pass it explicitly via `--token-file`.
 
+
+## One-command install for Ubuntu 24.04
+
+Run installer directly from GitHub:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/CleoWixom/ztnet-dns/main/scripts/install-ubuntu-24.04.sh)
+```
+
+The script supports both regular user (with `sudo`) and direct `root` execution.
+
+The installer will interactively request and validate:
+- `TOKEN ZTNET API` file path (default: `/run/secrets/ztnet_token`); token is read from file and re-checked until valid
+- `API_URL` (default: `http://127.0.0.1:3000`, validates format/reachability)
+- `ZONE` (default: `zt.local`)
+- `NETWORK_ID` (default: empty, with format validation: 16-hex network id)
+
+If token validation fails, the script asks you to update the token file and repeats validation. After validation it installs CoreDNS + ztnet plugin, writes `/etc/coredns/Corefile`, securely saves token to `/run/secrets/ztnet_token`, and starts `coredns-ztnet.service`.
+
 ## Development checks
 
 ```bash
