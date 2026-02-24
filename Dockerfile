@@ -1,8 +1,12 @@
 FROM golang:1.24.13 AS build
 WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
 COPY . .
 RUN go mod tidy && \
-    go test ./... && \
+    go test ./... -race -count=1 -timeout=120s && \
     make build-coredns
 
 FROM gcr.io/distroless/base-debian12
