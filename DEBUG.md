@@ -1,4 +1,4 @@
-# ztnet-dns Debug Guide (DEGUB)
+# ztnet-dns Debug Guide
 
 This manual describes practical debugging and validation steps for `ztnet-dns` in development and production-like Linux environments.
 
@@ -33,7 +33,7 @@ For full Linux installation (build + binary/config/service/helper install):
 sudo make install
 ```
 
-000To inspect port usage and zt* interfaces:
+To inspect port usage and zt* interfaces:
 
 ```bash
 make check-port
