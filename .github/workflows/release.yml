@@ -7,12 +7,20 @@ on:
       - "**/*.go"
       - "go.mod"
       - "go.sum"
+  pull_request:
+    types: [closed]
+    branches: ["main"]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
 
 permissions:
   contents: write
 
 jobs:
   release:
+    if: github.event_name == 'push' || github.event.pull_request.merged == true
     runs-on: ubuntu-24.04
 
     steps:
@@ -20,6 +28,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
 
       - name: Setup Go from go.mod
         uses: actions/setup-go@v5
