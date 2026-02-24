@@ -690,6 +690,35 @@ func TestFetchMembers_500ThenOK(t *testing.T) {
 	}
 }
 
+func TestFetchMembers_429ThenOK(t *testing.T) {
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/network/n/member" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if calls.Add(1) <= 2 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		_, _ = w.Write([]byte(`[{"nodeId":"a","name":"srv","authorized":true,"ipAssignments":["10.0.0.2"]}]`))
+	}))
+	defer ts.Close()
+
+	c := &APIClient{BaseURL: ts.URL, NetworkID: "n", HTTPClient: ts.Client(), MaxRetries: 3}
+	ms, err := c.FetchMembers(context.Background(), "t")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ms) != 1 {
+		t.Fatalf("expected 1 member after retry, got %d", len(ms))
+	}
+	if calls.Load() != 3 {
+		t.Fatalf("expected 3 calls, got %d", calls.Load())
+	}
+}
+
 func TestFetchMembers_Timeout(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(80 * time.Millisecond)
