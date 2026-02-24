@@ -43,23 +43,6 @@ contents:
       owner: root
       group: coredns
 
-  # ── Secret directory (token) ────────────────────────────────────────────
-  - dst: /etc/coredns/secrets
-    type: dir
-    file_info:
-      mode: 0750
-      owner: root
-      group: coredns
-
-
-
-  - dst: /var/lib/coredns
-    type: dir
-    file_info:
-      mode: 0750
-      owner: coredns
-      group: coredns
-
   # ── Helper script for secure token install/rotation ─────────────────────
   - src: packaging/ztnetool
     dst: /usr/bin/ztnetool
