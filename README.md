@@ -78,7 +78,7 @@ Installer behavior:
 2. Optionally asks for advanced parameters (`EXITNODE_IPV4`, `EXITNODE_IPV6`, `AUTO_ALLOW_ZT`, `REFRESH`, `TIMEOUT`, `TTL`, `DNS_UPSTREAM`).
 3. Installs dependencies:
    - `apt-get update`
-   - `apt-get install -y git make build-essential ca-certificates curl dnsutils net-tools iproute2 golang gnupg`
+   - `apt-get install -y git make build-essential ca-certificates curl dnsutils net-tools iproute2 golang gnupg ripgrep`
 4. Ensures `coredns:coredns` user/group exists.
 5. Checks `zerotier-one` availability.
    - default mode: expects ZeroTier One already installed

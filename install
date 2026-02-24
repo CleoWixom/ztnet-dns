@@ -134,7 +134,7 @@ install_zerotier() {
 install_dependencies() {
   log "Installing dependencies"
   apt-get update
-  apt-get install -y git make build-essential ca-certificates curl dnsutils net-tools iproute2 golang gnupg
+  apt-get install -y git make build-essential ca-certificates curl dnsutils net-tools iproute2 golang gnupg ripgrep
   ok "Dependencies installed"
 }
 
@@ -290,13 +290,14 @@ main() {
     return 0
   fi
 
+  collect_inputs
+  install_dependencies
+
   require_cmd rg
   require_cmd ss
   require_cmd ifconfig
   require_cmd systemctl
 
-  collect_inputs
-  install_dependencies
   ensure_coredns_identity
   check_zerotier
   check_port_bind
