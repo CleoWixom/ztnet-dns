@@ -14,10 +14,11 @@ make install-deps
 make ensure-go
 ```
 
-## 3) Verify source and tests
+## 3) Verify source, tests and embedded release version log
 
 ```bash
 make verify
+make verify-release-log
 ```
 
 ## 4) Build plugin packages

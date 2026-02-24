@@ -229,13 +229,41 @@ jobs:
           GOARCH: amd64
         run: |
           go build \
-            -ldflags="-s -w -X github.com/coredns/coredns/coremain.GitVersion=${{ steps.version.outputs.pkg }}" \
+            -ldflags="-s -w -X github.com/coredns/coredns/coremain.GitVersion=${{ steps.version.outputs.pkg }} -X ${PLUGIN_MODULE}.PluginVersion=${{ steps.version.outputs.pkg }}" \
             -trimpath \
             -o /tmp/coredns-bin \
             .
 
           # Проверяем что плагин ztnet действительно вшит
           /tmp/coredns-bin -plugins | grep ztnet
+
+      - name: Verify startup log embeds release plugin version
+        run: |
+          TMPDIR=$(mktemp -d)
+          trap 'rm -rf "$TMPDIR"' EXIT
+
+          TOKEN_FILE="$TMPDIR/token"
+          COREFILE="$TMPDIR/Corefile"
+
+          echo "dummy-token" > "$TOKEN_FILE"
+          cat > "$COREFILE" <<EOF
+          ztnet.local:1053 {
+              ztnet {
+                  api_url http://127.0.0.1:3000
+                  network_id 17d395d8cb43a800
+                  zone ztnet.local
+                  token_file ${TOKEN_FILE}
+              }
+              forward . 1.1.1.1
+          }
+          EOF
+
+          LOG=$(timeout 5s /tmp/coredns-bin -conf "$COREFILE" 2>&1 || true)
+          echo "$LOG" | grep "configured zone ztnet.local. (version "
+          if echo "$LOG" | grep -q "configured zone ztnet.local. (version dev)"; then
+            echo "release startup log check failed: version is dev"
+            exit 1
+          fi
 
       # ── Устанавливаем nfpm ────────────────────────────────────────────
       - name: Install nfpm
