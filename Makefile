@@ -32,7 +32,7 @@ help:
 	@echo "Targets:"
 	@echo "  install-deps   - Install required Linux packages (apt-based systems)"
 	@echo "  ensure-go      - Install Go toolchain if missing (apt-based systems)"
-	@echo "  check-port     - Check if DNS port is already occupied"
+	@echo "  check-port     - Check if DNS port is already occupied (via ss)"
 	@echo "  verify-bind-scope - Show listeners on :53 and zt* interfaces (manual policy check)"
 	@echo "  tidy           - Run go mod tidy"
 	@echo "  test           - Run tests with race detector"
@@ -65,9 +65,9 @@ ensure-go:
 
 check-port:
 	@echo "Checking port $(DNS_PORT) listeners..."
-	@if netstat -lntup 2>/dev/null | rg -q "[:.]$(DNS_PORT)\s"; then \
+	@if ss -lntupH 2>/dev/null | rg -q "[:.]$(DNS_PORT)\s"; then \
 		echo "WARNING: port $(DNS_PORT) is already in use:"; \
-		netstat -lntup 2>/dev/null | rg "[:.]$(DNS_PORT)\s" || true; \
+		ss -lntupH 2>/dev/null | rg "[:.]$(DNS_PORT)\s" || true; \
 		exit 1; \
 	else \
 		echo "OK: port $(DNS_PORT) is free"; \
@@ -90,7 +90,7 @@ tidy:
 	$(GO) mod tidy
 
 test:
-	$(GO) test $(GOFLAGS) $(PKG) -race -count=1
+	$(GO) test $(GOFLAGS) $(PKG) -race -count=1 -timeout=120s
 
 verify: tidy test
 
