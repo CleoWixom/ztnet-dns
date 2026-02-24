@@ -6,12 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"strings"
 	"time"
 )
 
 var ErrUnauthorized = errors.New("unauthorized")
+
+const (
+	baseRetryDelay = 100 * time.Millisecond
+	maxRetryDelay  = 2 * time.Second
+)
 
 // Member describes a ZTNET member response object.
 type Member struct {
@@ -90,6 +96,24 @@ type APIClient struct {
 	NetworkID  string
 	HTTPClient *http.Client
 	MaxRetries int
+	Jitter     func(max time.Duration) time.Duration
+}
+
+func (c *APIClient) retryDelay(attempt int) time.Duration {
+	delay := baseRetryDelay << attempt
+	if delay > maxRetryDelay {
+		delay = maxRetryDelay
+	}
+	jitter := c.Jitter
+	if jitter == nil {
+		jitter = func(max time.Duration) time.Duration {
+			if max <= 0 {
+				return 0
+			}
+			return time.Duration(rand.Int64N(max.Nanoseconds() + 1))
+		}
+	}
+	return delay + jitter(delay/2)
 }
 
 func waitRetry(ctx context.Context, delay time.Duration) error {
@@ -121,7 +145,7 @@ func (c *APIClient) getJSON(ctx context.Context, token, path string, out any) er
 			if i == c.MaxRetries {
 				return fmt.Errorf("GET %s: %w", path, err)
 			}
-			if err := waitRetry(ctx, time.Duration(i+1)*100*time.Millisecond); err != nil {
+			if err := waitRetry(ctx, c.retryDelay(i)); err != nil {
 				return err
 			}
 			continue
@@ -138,7 +162,7 @@ func (c *APIClient) getJSON(ctx context.Context, token, path string, out any) er
 			if i == c.MaxRetries {
 				return fmt.Errorf("GET %s status %d", path, resp.StatusCode)
 			}
-			if err := waitRetry(ctx, time.Duration(i+1)*100*time.Millisecond); err != nil {
+			if err := waitRetry(ctx, c.retryDelay(i)); err != nil {
 				return err
 			}
 			continue
