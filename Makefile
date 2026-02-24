@@ -10,7 +10,8 @@ DESTDIR ?=
 GO ?= go
 GOFLAGS ?=
 PKG ?= ./...
-LDFLAGS ?= -X main.PluginVersion=$(VERSION)
+PLUGIN_PKG ?= github.com/CleoWixom/ztnet-dns
+LDFLAGS ?= -X $(PLUGIN_PKG).PluginVersion=$(VERSION)
 
 VERSION := $(shell git describe --tags --always --dirty)
 
@@ -24,7 +25,8 @@ PLUGIN_DIR ?= $(CURDIR)
 DNS_PORT ?= 53
 ZT_INTERFACE_GLOB ?= zt*
 
-.PHONY: help install-deps ensure-go check-port verify-bind-scope tidy test verify build-plugin build-coredns \
+
+.PHONY: help install-deps ensure-go check-port verify-bind-scope tidy test verify verify-release-log build-plugin build-coredns \
 	install install-helper install-binary install-config install-service install-zerotier-compat \
 	version update uninstall clean
 
@@ -37,6 +39,7 @@ help:
 	@echo "  tidy           - Run go mod tidy"
 	@echo "  test           - Run tests with race detector"
 	@echo "  verify         - tidy + tests"
+	@echo "  verify-release-log - Build and validate startup version log for release"
 	@echo "  version        - Print plugin version"
 	@echo "  build-plugin   - Compile plugin module packages"
 	@echo "  build-coredns  - Build CoreDNS with ztnet plugin in temp workdir"
@@ -93,6 +96,27 @@ test:
 	$(GO) test $(GOFLAGS) $(PKG) -race -count=1
 
 verify: tidy test
+
+verify-release-log: build-coredns
+	@TMPDIR=$$(mktemp -d); \
+		trap 'rm -rf "$$TMPDIR"' EXIT; \
+		TOKEN_FILE="$$TMPDIR/token"; \
+		COREFILE="$$TMPDIR/Corefile"; \
+		echo "dummy-token" > "$$TOKEN_FILE"; \
+		printf "%s\n" \
+			"ztnet.local:1053 {" \
+			"    ztnet {" \
+			"        api_url http://127.0.0.1:3000" \
+			"        network_id 17d395d8cb43a800" \
+			"        zone ztnet.local" \
+			"        token_file __TOKEN_FILE__" \
+			"    }" \
+			"    forward . 1.1.1.1" \
+			"}" > "$$COREFILE"; \
+		sed -i "s|__TOKEN_FILE__|$$TOKEN_FILE|" "$$COREFILE"; \
+		LOG=$$(timeout 5s "$(COREDNS_BIN)" -conf "$$COREFILE" 2>&1 || true); \
+		echo "$$LOG" | rg -Fq "configured zone ztnet.local. (version "; \
+		echo "$$LOG" | rg -Fq "configured zone ztnet.local. (version dev)" && { echo "release log check failed: version is dev"; exit 1; } || true
 
 build-plugin:
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" $(PKG)

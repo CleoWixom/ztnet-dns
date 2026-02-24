@@ -136,6 +136,7 @@ Build instructions moved to [`BUILD.md`](BUILD.md).
 ```bash
 go test ./... -race -count=1
 golangci-lint run ./...
+make verify-release-log
 ```
 
 ## Versioning and release
