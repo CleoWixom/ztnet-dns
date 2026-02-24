@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coredns/caddy"
 	"github.com/miekg/dns"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -137,6 +138,140 @@ func TestServeDNS_A(t *testing.T) {
 	rcode, err := p.ServeDNS(context.Background(), rw, req)
 	if err != nil || rcode != dns.RcodeSuccess || len(rw.msg.Answer) != 1 {
 		t.Fatalf("rcode=%d err=%v ans=%d", rcode, err, len(rw.msg.Answer))
+	}
+}
+
+func TestParse(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		corefile  string
+		errText   string
+		assertCfg func(t *testing.T, cfg Config)
+	}{
+		{
+			name: "happy-path with all key params",
+			corefile: `ztnet {
+				api_url http://127.0.0.1:3000
+				network_id 17d395d8cb43a800
+				zone ZT.Example.COM
+				token_file /tmp/token
+				auto_allow_zt false
+				allowed_networks 10.0.0.0/8 192.168.0.0/16
+				ttl 120
+				refresh 45s
+				timeout 7s
+				max_retries 5
+				strict_start true
+				search_domain CORP.EXAMPLE.COM
+				allow_short_names true
+			}`,
+			assertCfg: func(t *testing.T, cfg Config) {
+				t.Helper()
+				if cfg.APIURL != "http://127.0.0.1:3000" || cfg.NetworkID != "17d395d8cb43a800" {
+					t.Fatalf("unexpected API config: %#v", cfg)
+				}
+				if cfg.Zone != "zt.example.com." {
+					t.Fatalf("expected normalized zone, got %q", cfg.Zone)
+				}
+				if cfg.Token.Source != TokenSourceFile || cfg.Token.Value != "/tmp/token" {
+					t.Fatalf("unexpected token config: %#v", cfg.Token)
+				}
+				if cfg.AutoAllowZT || cfg.TTL != 120 || cfg.Refresh != 45*time.Second || cfg.Timeout != 7*time.Second || cfg.MaxRetries != 5 || !cfg.StrictStart || !cfg.AllowShort {
+					t.Fatalf("unexpected scalar values: %#v", cfg)
+				}
+				if !slices.Equal(cfg.AllowedCIDRs, []string{"10.0.0.0/8", "192.168.0.0/16"}) {
+					t.Fatalf("unexpected allowed cidrs: %#v", cfg.AllowedCIDRs)
+				}
+				if cfg.SearchDomain != "corp.example.com." {
+					t.Fatalf("expected normalized search_domain, got %q", cfg.SearchDomain)
+				}
+			},
+		},
+		{
+			name: "unknown option",
+			corefile: `ztnet {
+				api_url http://127.0.0.1:3000
+				network_id 17d395d8cb43a800
+				zone zt.example.com
+				token_file /tmp/token
+				wat nope
+			}`,
+			errText: "unknown option wat",
+		},
+		{
+			name: "exactly one token source required",
+			corefile: `ztnet {
+				api_url http://127.0.0.1:3000
+				network_id 17d395d8cb43a800
+				zone zt.example.com
+				token_file /tmp/token
+				token_env ZTNET_TOKEN
+			}`,
+			errText: "exactly one token source required",
+		},
+		{
+			name: "api_url network_id and zone are required",
+			corefile: `ztnet {
+				network_id 17d395d8cb43a800
+				token_file /tmp/token
+			}`,
+			errText: "api_url, network_id and zone are required",
+		},
+		{
+			name: "max_retries < 0",
+			corefile: `ztnet {
+				api_url http://127.0.0.1:3000
+				network_id 17d395d8cb43a800
+				zone zt.example.com
+				token_file /tmp/token
+				max_retries -1
+			}`,
+			errText: "max_retries must be >= 0, got -1",
+		},
+		{
+			name: "normalizes zone and default search_domain to fqdn lower-case",
+			corefile: `ztnet {
+				api_url http://127.0.0.1:3000
+				network_id 17d395d8cb43a800
+				zone ZT.EXAMPLE.COM
+				token_file /tmp/token
+			}`,
+			assertCfg: func(t *testing.T, cfg Config) {
+				t.Helper()
+				if cfg.Zone != "zt.example.com." {
+					t.Fatalf("expected normalized zone, got %q", cfg.Zone)
+				}
+				if cfg.SearchDomain != "zt.example.com." {
+					t.Fatalf("expected default normalized search_domain, got %q", cfg.SearchDomain)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c := caddy.NewTestController("dns", tt.corefile)
+			cfg, err := parse(c)
+			if tt.errText != "" {
+				if err == nil {
+					t.Fatalf("expected error %q, got nil", tt.errText)
+				}
+				if err.Error() != tt.errText {
+					t.Fatalf("unexpected error text: got %q want %q", err.Error(), tt.errText)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parse error: %v", err)
+			}
+			if tt.assertCfg != nil {
+				tt.assertCfg(t, cfg)
+			}
+		})
 	}
 }
 
