@@ -19,10 +19,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Go 1.25.7
+      - name: Set up Go 1.24.13
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25.7"
+          go-version: "1.24.13"
           cache: true
 
       - name: Install govulncheck
