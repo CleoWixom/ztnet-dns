@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 type nextOK struct{}
@@ -627,4 +628,17 @@ func TestRefresh_StaleOnAPIError(t *testing.T) {
 	if len(p.cache.LookupA("srv.zt.example.com.")) == 0 {
 		t.Fatal("stale cache should remain")
 	}
+}
+
+func TestRegisterMetrics_DoesNotPanicOnDuplicate(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	registerMetrics(registry)
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("registerMetrics panicked on duplicate registration: %v", r)
+		}
+	}()
+
+	registerMetrics(registry)
 }
