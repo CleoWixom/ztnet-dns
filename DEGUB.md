@@ -100,8 +100,8 @@ Note on `zt.example.com { ... }` vs `zone zt.example.com`:
 Install/rotate token securely:
 
 ```bash
-sudo ztnet.token.install --help
-sudo ztnet.token.install "<ZTNET_API_TOKEN>"
+sudo ztnetool --help
+sudo ztnetool "<ZTNET_API_TOKEN>"
 ```
 
 Validate secret file properties:
@@ -227,7 +227,7 @@ Symptoms:
 - token reload failures
 
 Actions:
-1. rotate token file with `ztnet.token.install`
+1. rotate token file with `ztnetool`
 2. verify file perms/ownership
 3. verify `token_file` path in Corefile
 
