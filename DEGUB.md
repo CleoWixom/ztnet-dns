@@ -18,8 +18,11 @@ From repository root:
 ```bash
 make verify
 make check-port
-make build-plugin
+make compile-plugin
 ```
+
+`compile-plugin` performs only package compilation validation for the plugin code;
+it is not a standalone binary release step.
 
 To build CoreDNS with embedded `ztnet` plugin:
 

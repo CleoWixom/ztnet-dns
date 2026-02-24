@@ -24,7 +24,8 @@ PLUGIN_DIR ?= $(CURDIR)
 DNS_PORT ?= 53
 ZT_INTERFACE_GLOB ?= zt*
 
-.PHONY: help install-deps ensure-go check-port verify-bind-scope tidy test verify build-plugin build-coredns \
+
+.PHONY: help install-deps ensure-go check-port verify-bind-scope tidy test verify compile-plugin build-coredns \
 	install install-helper install-binary install-config install-service install-zerotier-compat \
 	version update uninstall clean
 
@@ -38,7 +39,7 @@ help:
 	@echo "  test           - Run tests with race detector"
 	@echo "  verify         - tidy + tests"
 	@echo "  version        - Print plugin version"
-	@echo "  build-plugin   - Compile plugin module packages"
+	@echo "  compile-plugin - Compile-check plugin module packages (no standalone binary output)"
 	@echo "  build-coredns  - Build CoreDNS with ztnet plugin in temp workdir"
 	@echo "  install        - Full Linux install flow (build + install + service)"
 	@echo "  update         - Pull latest repository changes and reinstall"
@@ -94,7 +95,7 @@ test:
 
 verify: tidy test
 
-build-plugin:
+compile-plugin:
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" $(PKG)
 
 build-coredns:

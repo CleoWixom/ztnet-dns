@@ -123,6 +123,9 @@ Generated Corefile template:
 
 Build instructions moved to [`BUILD.md`](BUILD.md).
 
+Note: `make compile-plugin` in build docs is a compile-check for plugin packages
+and not a standalone binary release step.
+
 ## Validation and tests
 
 ```bash
