@@ -32,14 +32,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-require_cmd() { command -v "$1" >/dev/null 2>&1 || fail "Требуется команда: $1"; }
-
-ensure_root() {
-  [[ "$EUID" -eq 0 ]] || fail "Запустите installer через sudo/root"
-}
+require_cmd() { command -v "$1" >/dev/null 2>&1 || fail "Required command not found: $1"; }
+ensure_root() { [[ "$EUID" -eq 0 ]] || fail "Run installer with sudo/root"; }
 
 prompt_required() {
-  local var_name="$1"; local prompt="$2"; local value=""
+  local var_name="$1" prompt="$2" value=""
   while true; do
     read -r -p "$prompt" value
     value="${value//[$'\r\n']/}"
@@ -47,101 +44,98 @@ prompt_required() {
       printf -v "$var_name" '%s' "$value"
       return 0
     fi
-    warn "Поле обязательно"
+    warn "This field is required"
   done
 }
 
 prompt_default() {
-  local var_name="$1"; local prompt="$2"; local def="$3"; local value=""
+  local var_name="$1" prompt="$2" def="$3" value=""
   read -r -p "$prompt [$def]: " value
-  value="${value:-$def}"
-  printf -v "$var_name" '%s' "$value"
+  printf -v "$var_name" '%s' "${value:-$def}"
 }
 
 ensure_coredns_identity() {
   if ! getent group coredns >/dev/null; then
-    log "Создаю группу coredns"
+    log "Creating group coredns"
     groupadd --system coredns
   fi
   if ! getent passwd coredns >/dev/null; then
-    log "Создаю пользователя coredns"
+    log "Creating user coredns"
     useradd --system --gid coredns --home-dir /nonexistent --shell /usr/sbin/nologin coredns 2>/dev/null || \
       useradd --system --gid coredns --home-dir /nonexistent --shell /bin/false coredns
   fi
-  ok "Пользователь/группа coredns:coredns готовы"
+  ok "User/group coredns:coredns is ready"
 }
 
 install_dependencies() {
-  log "Установка зависимостей"
+  log "Installing dependencies"
   apt-get update
   apt-get install -y git make build-essential ca-certificates curl dnsutils net-tools iproute2 golang
-  ok "Зависимости установлены"
+  ok "Dependencies installed"
 }
 
 check_zerotier() {
   if ! command -v zerotier-one >/dev/null 2>&1; then
-    fail "zerotier-one не установлен. Установите ZeroTier One:\ncurl -s 'https://raw.githubusercontent.com/zerotier/ZeroTierOne/main/doc/contact%40zerotier.com.gpg' | gpg --import && \\
+    fail "zerotier-one is not installed. Install ZeroTier One first:\ncurl -s 'https://raw.githubusercontent.com/zerotier/ZeroTierOne/main/doc/contact%40zerotier.com.gpg' | gpg --import && \\
 if z=$(curl -s 'https://install.zerotier.com/' | gpg); then echo \"$z\" | sudo bash; fi"
   fi
 
-  if ! ifconfig 2>/dev/null | rg -q '^zt'; then
-    local svc="/lib/systemd/system/zerotier-one.service"
-    [[ -f "$svc" ]] || fail "Не найден $svc для патча -U"
-
-    if ! rg -q '/usr/sbin/zerotier-one -U' "$svc"; then
-      log "Патчу zerotier-one.service: добавляю аргумент -U"
-      sed -i 's#/usr/sbin/zerotier-one#/usr/sbin/zerotier-one -U#g' "$svc"
-    fi
-
-    systemctl daemon-reload
-    systemctl restart zerotier-one.service
-    sleep 2
-    if ! ifconfig 2>/dev/null | rg -q '^zt'; then
-      fail "После патча интерфейс zt* не появился"
-    fi
+  if ifconfig 2>/dev/null | rg -q '^zt'; then
+    ok "ZeroTier interface zt* is present"
+    return 0
   fi
-  ok "ZeroTier проверен (zt* интерфейс найден)"
+
+  local svc="/lib/systemd/system/zerotier-one.service"
+  [[ -f "$svc" ]] || fail "Service file not found: $svc"
+
+  if ! rg -q '/usr/sbin/zerotier-one -U' "$svc"; then
+    log "Patching zerotier-one.service with -U"
+    sed -i 's#/usr/sbin/zerotier-one#/usr/sbin/zerotier-one -U#g' "$svc"
+  fi
+
+  systemctl daemon-reload
+  systemctl restart zerotier-one.service
+  sleep 2
+  if ! ifconfig 2>/dev/null | rg -q '^zt'; then
+    fail "ZeroTier interface zt* is still missing after patch/restart"
+  fi
+
+  ok "ZeroTier service checked and zt* interface is available"
 }
 
 check_port_bind() {
-  log "Проверка порта 53 на адресах ${NODE_IPV4} ${NODE_IPV6}"
+  log "Checking port 53 availability on ${NODE_IPV4} and ${NODE_IPV6}"
   local hits
   hits="$(ss -H -lunpt 2>/dev/null | awk '{print $5}' | rg "^(${NODE_IPV4}|\[${NODE_IPV6}\]):53$" || true)"
-  if [[ -n "$hits" ]]; then
-    fail "Порт 53 уже занят на одном из bind-адресов"
-  fi
-  ok "Порт 53 свободен на target bind-адресах"
+  [[ -z "$hits" ]] || fail "Port 53 is already in use on one of the bind addresses"
+  ok "Port 53 is free on target bind addresses"
 }
 
-validate_bool() {
-  case "${1,,}" in true|false) return 0;; *) return 1;; esac
-}
+validate_bool() { case "${1,,}" in true|false) return 0 ;; *) return 1 ;; esac; }
 
 collect_inputs() {
-  echo -e "${C_BOLD}=== Параметры установки ===${C_RESET}"
-  prompt_default API_URL "1) Ввод API_URL" "http://127.0.0.1:3000"
-  prompt_required TOKEN_INPUT "2) Ввод TOKEN API (*): "
-  prompt_required NETWORK_ID "3) Ввод NETWORK_ID (*): "
-  prompt_default ZONE "4) Ввод ZONE" "ztnet.local"
+  echo -e "${C_BOLD}=== Installation parameters ===${C_RESET}"
+  prompt_default API_URL "1) API_URL" "http://127.0.0.1:3000"
+  prompt_required TOKEN_INPUT "2) API TOKEN (*): "
+  prompt_required NETWORK_ID "3) NETWORK_ID (*): "
+  prompt_default ZONE "4) ZONE" "ztnet.local"
 
   local extra=""
-  prompt_default extra "5) Дополнительные параметры настроить? [Yes/No]" "No"
+  prompt_default extra "5) Configure additional parameters? [Yes/No]" "No"
   if [[ "${extra,,}" == "yes" || "${extra,,}" == "y" ]]; then
-    prompt_default NODE_IPV4 "6) Ввод NODE_IPV4" "192.168.55.1"
-    prompt_default NODE_IPV6 "7) Ввод NODE_IPV6" "fc4e:1d7b:a5ac:d8cf:20e2::1"
-    prompt_default AUTO_ALLOW_ZT "8) Ввод AUTO_ALLOW_ZT [true/false]" "true"
-    validate_bool "$AUTO_ALLOW_ZT" || fail "AUTO_ALLOW_ZT должен быть true|false"
-    prompt_default REFRESH "9) Ввод REFRESH" "30s"
-    prompt_default TIMEOUT "10) Ввод TIMEOUT" "5s"
-    prompt_default TTL "11) Ввод TTL" "60"
-    prompt_default DNS_UPSTREAM "12) Ввод DNS_UPSTREAM" "1.1.1.1 8.8.8.8"
-  else
-    AUTO_ALLOW_ZT="true"
+    prompt_default NODE_IPV4 "6) NODE_IPV4" "192.168.55.1"
+    prompt_default NODE_IPV6 "7) NODE_IPV6" "fc4e:1d7b:a5ac:d8cf:20e2::1"
+    prompt_default AUTO_ALLOW_ZT "8) AUTO_ALLOW_ZT [true/false]" "true"
+    validate_bool "$AUTO_ALLOW_ZT" || fail "AUTO_ALLOW_ZT must be true or false"
+    prompt_default REFRESH "9) REFRESH" "30s"
+    prompt_default TIMEOUT "10) TIMEOUT" "5s"
+    prompt_default TTL "11) TTL" "60"
+    prompt_default DNS_UPSTREAM "12) DNS_UPSTREAM" "1.1.1.1 8.8.8.8"
   fi
 }
 
 write_corefile() {
-  log "Записываю /etc/coredns/Corefile"
+  log "Writing /etc/coredns/Corefile"
   install -d -m 0750 /etc/coredns
   cat > /etc/coredns/Corefile <<CORE
 ${ZONE} {
@@ -173,7 +167,31 @@ ${ZONE} {
 CORE
   chmod 0640 /etc/coredns/Corefile
   chown root:coredns /etc/coredns/Corefile
-  ok "Corefile обновлен"
+  ok "Corefile updated"
+}
+
+install_project() {
+  log "Cloning repository: ${REPO_URL}"
+  WORKDIR="$(mktemp -d /tmp/ztnet-dns-install.XXXXXX)"
+  git clone --depth=1 "$REPO_URL" "$WORKDIR/repo"
+
+  pushd "$WORKDIR/repo" >/dev/null
+  log "Running verify/build/install targets"
+  make verify
+  make build-coredns
+  make install-binary install-config install-helper
+  popd >/dev/null
+}
+
+start_service() {
+  if command -v setcap >/dev/null 2>&1; then
+    setcap 'cap_net_bind_service=+ep' /usr/sbin/coredns || true
+  fi
+  systemctl daemon-reload
+  systemctl enable --now coredns-ztnet.service
+  systemctl restart coredns-ztnet.service
+  ok "Service started"
+  systemctl --no-pager --full status coredns-ztnet.service || true
 }
 
 main() {
@@ -188,27 +206,15 @@ main() {
   ensure_coredns_identity
   check_zerotier
   check_port_bind
-
-  WORKDIR="$(mktemp -d /tmp/ztnet-dns-install.XXXXXX)"
-  log "Клонирую репозиторий: ${REPO_URL}"
-  git clone --depth=1 "$REPO_URL" "$WORKDIR/repo"
-  pushd "$WORKDIR/repo" >/dev/null
-
-  log "Сборка и установка CoreDNS+plugin"
-  make install
+  install_project
   write_corefile
 
-  log "Записываю токен через ztnetool"
+  log "Writing token via ztnetool"
   /usr/bin/ztnetool -t "$TOKEN_INPUT" --token-file "$FILE_TOKEN" --corefile /etc/coredns/Corefile
   /usr/bin/ztnetool -c --api-url "$API_URL" --network-id "$NETWORK_ID" --token-file "$FILE_TOKEN"
 
-  systemctl daemon-reload
-  systemctl enable --now coredns-ztnet.service
-  systemctl restart coredns-ztnet.service
-  ok "Установка завершена"
-  systemctl --no-pager --full status coredns-ztnet.service || true
-
-  popd >/dev/null
+  start_service
+  ok "Installation completed"
 }
 
 main "$@"

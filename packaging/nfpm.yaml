@@ -1,11 +1,11 @@
 # packaging/nfpm.yaml
-# Используется командой: PKG_VERSION=x.y.z nfpm package --config packaging/nfpm.yaml --packager deb
-# Документация: https://nfpm.goreleaser.com/configuration/
+# Used by command: PKG_VERSION=x.y.z nfpm package --config packaging/nfpm.yaml --packager deb
+# Docs: https://nfpm.goreleaser.com/configuration/
 
 name: coredns-ztnet
 arch: amd64
 platform: linux
-version: "${PKG_VERSION}"   # инжектируется из env в CI
+version: "${PKG_VERSION}"   # injected from env in CI
 
 maintainer: "CleoWixom <noreply@github.com>"
 description: |
@@ -16,17 +16,17 @@ vendor: "CleoWixom"
 homepage: "https://github.com/CleoWixom/ztnet-dns"
 license: "Apache-2.0"
 
-# Секция deb — метаданные пакета
+# deb section — package metadata
 deb:
-  # Compression: xz даёт наименьший размер
+  # Compression: xz gives the smallest size
   compression: xz
   fields:
-    # Пакет заменяет системный coredns если он был установлен
+    # Package replaces system coredns if already installed
     Conflicts: coredns
     Provides: coredns
 
 contents:
-  # ── Бинарь ──────────────────────────────────────────────────────────────
+  # ── Binary ─────────────────────────────────────────────────────────────
   - src: /tmp/coredns-bin
     dst: /usr/sbin/coredns
     file_info:
@@ -34,7 +34,7 @@ contents:
       owner: root
       group: root
 
-  # ── Пример Corefile (config — не перезаписывается при обновлении) ────────
+  # ── Corefile example (config — not overwritten on upgrade) ─────────────
   - src: Corefile.example
     dst: /etc/coredns/Corefile
     type: config|noreplace
@@ -43,7 +43,7 @@ contents:
       owner: root
       group: root
 
-  # ── Директория для секретов (токен) ─────────────────────────────────────
+  # ── Secret directory (token) ────────────────────────────────────────────
   - dst: /etc/coredns/secrets
     type: dir
     file_info:
@@ -69,6 +69,6 @@ contents:
       group: root
 
 scripts:
-  # postinstall: setcap чтобы слушать на 53 без root, enable + start сервиса
+  # postinstall: setcap for port 53 without root, enable + start service
   postinstall: packaging/scripts/postinstall.sh
   preremove: packaging/scripts/preremove.sh
