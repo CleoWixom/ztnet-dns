@@ -11,7 +11,7 @@ permissions:
   contents: write   # для создания release и загрузки артефактов
 
 env:
-  GO_VERSION: "1.25.7"
+  GO_VERSION: "1.24.x"
   COREDNS_VERSION: "v1.14.0"
   PLUGIN_MODULE: "github.com/CleoWixom/ztnet-dns"
 
