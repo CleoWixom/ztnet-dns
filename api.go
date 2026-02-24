@@ -92,6 +92,18 @@ type APIClient struct {
 	MaxRetries int
 }
 
+func waitRetry(ctx context.Context, delay time.Duration) error {
+	t := time.NewTimer(delay)
+	defer t.Stop()
+
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (c *APIClient) getJSON(ctx context.Context, token, path string, out any) error {
 	url := strings.TrimRight(c.BaseURL, "/") + path
 	for i := 0; i <= c.MaxRetries; i++ {
@@ -103,10 +115,15 @@ func (c *APIClient) getJSON(ctx context.Context, token, path string, out any) er
 
 		resp, err := c.HTTPClient.Do(req)
 		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			if i == c.MaxRetries {
 				return fmt.Errorf("GET %s: %w", path, err)
 			}
-			time.Sleep(time.Duration(i+1) * 100 * time.Millisecond)
+			if err := waitRetry(ctx, time.Duration(i+1)*100*time.Millisecond); err != nil {
+				return err
+			}
 			continue
 		}
 
@@ -121,7 +138,9 @@ func (c *APIClient) getJSON(ctx context.Context, token, path string, out any) er
 			if i == c.MaxRetries {
 				return fmt.Errorf("GET %s status %d", path, resp.StatusCode)
 			}
-			time.Sleep(time.Duration(i+1) * 100 * time.Millisecond)
+			if err := waitRetry(ctx, time.Duration(i+1)*100*time.Millisecond); err != nil {
+				return err
+			}
 			continue
 		}
 		if resp.StatusCode >= 400 {

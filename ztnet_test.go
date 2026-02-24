@@ -485,6 +485,80 @@ func TestFetchMembers_Timeout(t *testing.T) {
 	}
 }
 
+func TestFetchMembers_RetryStopsOnContextTimeout(t *testing.T) {
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/network/n/member" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		calls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	c := &APIClient{BaseURL: ts.URL, NetworkID: "n", HTTPClient: ts.Client(), MaxRetries: 5}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := c.FetchMembers(ctx, "t")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected deadline exceeded, got %v", err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("expected 1 call before timeout during retry wait, got %d", got)
+	}
+	if elapsed := time.Since(start); elapsed >= 100*time.Millisecond {
+		t.Fatalf("expected early exit before retry sleep, took %s", elapsed)
+	}
+}
+
+func TestFetchNetwork_RetryStopsOnContextCancel(t *testing.T) {
+	var calls atomic.Int32
+	firstCall := make(chan struct{}, 1)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/network/n" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if calls.Add(1) == 1 {
+			firstCall <- struct{}{}
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	c := &APIClient{BaseURL: ts.URL, NetworkID: "n", HTTPClient: ts.Client(), MaxRetries: 5}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := c.FetchNetwork(ctx, "t")
+		result <- err
+	}()
+
+	select {
+	case <-firstCall:
+		cancel()
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first call")
+	}
+
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context canceled, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("fetch network did not stop after cancel")
+	}
+
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("expected 1 call before cancel during retry wait, got %d", got)
+	}
+}
+
 func TestRefresh_TokenRotation(t *testing.T) {
 	var seenMu sync.Mutex
 	seen := make([]string, 0, 4)
