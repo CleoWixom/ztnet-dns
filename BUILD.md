@@ -20,11 +20,14 @@ make ensure-go
 make verify
 ```
 
-## 4) Build plugin packages
+## 4) Compile-check plugin packages
 
 ```bash
-make build-plugin
+make compile-plugin
 ```
+
+`compile-plugin` only verifies that plugin packages compile with version ldflags.
+It does **not** produce a standalone release binary.
 
 ## 5) Build CoreDNS with `ztnet` plugin
 
