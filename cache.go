@@ -48,6 +48,11 @@ func (r *RecordCache) load() cacheSnapshot             { return r.snap.Load().(c
 func (r *RecordCache) LookupA(name string) []net.IP    { return r.load().a[name] }
 func (r *RecordCache) LookupAAAA(name string) []net.IP { return r.load().aaaa[name] }
 
+func (r *RecordCache) LookupBoth(name string) ([]net.IP, []net.IP) {
+	s := r.load()
+	return s.a[name], s.aaaa[name]
+}
+
 // IsAllowed returns source allow result, honoring strict_start when allowlist is nil.
 func (r *RecordCache) IsAllowed(ip net.IP, strictStart bool) bool {
 	s := r.load()

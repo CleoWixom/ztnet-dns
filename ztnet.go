@@ -92,8 +92,7 @@ func (p *ZtnetPlugin) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns
 		return dns.RcodeSuccess, nil
 	}
 
-	aRecords := p.cache.LookupA(lookupName)
-	aaaaRecords := p.cache.LookupAAAA(lookupName)
+	aRecords, aaaaRecords := p.cache.LookupBoth(lookupName)
 	foundName := len(aRecords) > 0 || len(aaaaRecords) > 0
 
 	switch q.Qtype {
