@@ -35,6 +35,24 @@ func mustAllowed(t *testing.T, cidrs ...string) *AllowedNets {
 	return a
 }
 
+func assertDNSSDTXTPath(t *testing.T, msg *dns.Msg, expectedPath string) {
+	t.Helper()
+	if msg == nil || len(msg.Answer) != 1 {
+		t.Fatalf("expected one TXT answer, got msg=%v answers=%d", msg != nil, len(msg.Answer))
+	}
+	txt, ok := msg.Answer[0].(*dns.TXT)
+	if !ok {
+		t.Fatalf("expected TXT answer, got %T", msg.Answer[0])
+	}
+	expected := "path=" + expectedPath
+	for _, field := range txt.Txt {
+		if field == expected {
+			return
+		}
+	}
+	t.Fatalf("expected TXT to contain %q, got %v", expected, txt.Txt)
+}
+
 func TestCacheSnapshot(t *testing.T) {
 	rc := NewRecordCache()
 	a := map[string][]net.IP{"a.": {net.ParseIP("10.0.0.1")}}
@@ -803,9 +821,10 @@ func TestServeDNS_DNSSD_TXT(t *testing.T) {
 	req := new(dns.Msg)
 	req.SetQuestion("_dns-sd._udp.zt.example.com.", dns.TypeTXT)
 	rcode, _ := p.ServeDNS(context.Background(), rw, req)
-	if rcode != dns.RcodeSuccess || len(rw.msg.Answer) != 1 {
-		t.Fatalf("expected TXT answer, got rcode=%d answers=%d", rcode, len(rw.msg.Answer))
+	if rcode != dns.RcodeSuccess {
+		t.Fatalf("expected TXT answer, got rcode=%d", rcode)
 	}
+	assertDNSSDTXTPath(t, rw.msg, "corp.example.com.")
 }
 
 func TestServeDNS_ShortName_Hit(t *testing.T) {
@@ -868,13 +887,15 @@ func TestServeDNS_AllowShort_DoesNotChangeInZoneMiss(t *testing.T) {
 
 func TestServeDNS_DNSSD_Custom(t *testing.T) {
 	p := basePlugin(t)
+	p.cfg.SearchDomain = "corp.example."
 	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 1111}}
 	req := new(dns.Msg)
 	req.SetQuestion("_dns-sd._udp.zt.example.com.", dns.TypeTXT)
 	rcode, _ := p.ServeDNS(context.Background(), rw, req)
-	if rcode != dns.RcodeSuccess || len(rw.msg.Answer) != 1 {
-		t.Fatalf("expected TXT answer for default search domain, got rcode=%d answers=%d", rcode, len(rw.msg.Answer))
+	if rcode != dns.RcodeSuccess {
+		t.Fatalf("expected TXT answer for custom search domain, got rcode=%d", rcode)
 	}
+	assertDNSSDTXTPath(t, rw.msg, "corp.example.")
 }
 
 func TestServeDNS_Allowed_ZT(t *testing.T) {
