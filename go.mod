@@ -1,6 +1,6 @@
 module github.com/CleoWixom/ztnet-dns
 
-go 1.24.0
+go 1.24.13
 
 require (
 	github.com/coredns/caddy v1.1.4-0.20250930002214-15135a999495
