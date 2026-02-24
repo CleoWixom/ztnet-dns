@@ -101,6 +101,9 @@ func parse(c *caddy.Controller) (Config, error) {
 				if err != nil {
 					return cfg, fmt.Errorf("max_retries parse: %w", err)
 				}
+				if v < 0 {
+					return cfg, fmt.Errorf("max_retries must be >= 0, got %d", v)
+				}
 				cfg.MaxRetries = v
 			case "strict_start":
 				v, err := strconv.ParseBool(args[0])

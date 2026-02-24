@@ -50,7 +50,7 @@ version:
 
 install-deps:
 	sudo apt-get update
-	sudo apt-get install -y git make build-essential ca-certificates curl dnsutils net-tools iproute2
+	sudo apt-get install -y git make build-essential ca-certificates curl dnsutils net-tools iproute2 ripgrep
 
 ensure-go:
 	@if command -v $(GO) >/dev/null 2>&1; then \

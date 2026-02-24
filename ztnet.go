@@ -59,7 +59,13 @@ func (p *ZtnetPlugin) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns
 	}
 	q := r.Question[0]
 	qname := strings.ToLower(q.Name)
-	if !dns.IsSubDomain(p.zone, qname) {
+	lookupName := qname
+	inZone := dns.IsSubDomain(p.zone, qname)
+	if p.cfg.AllowShort && isBareName(qname) {
+		lookupName = qname[:len(qname)-1] + "." + p.zone
+		inZone = true
+	}
+	if !inZone {
 		return plugin.NextOrFailure(p.Name(), p.Next, ctx, w, r)
 	}
 	src := extractSourceIP(w)
@@ -86,13 +92,9 @@ func (p *ZtnetPlugin) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns
 		return dns.RcodeSuccess, nil
 	}
 
-	lookupName := qname
-	if p.cfg.AllowShort && isBareName(qname) {
-		lookupName = qname[:len(qname)-1] + "." + p.zone
-	}
 	aRecords := p.cache.LookupA(lookupName)
 	aaaaRecords := p.cache.LookupAAAA(lookupName)
-	foundName := len(aRecords) > 0 || len(aaaaRecords) > 0 || q.Qtype == dns.TypeSOA
+	foundName := len(aRecords) > 0 || len(aaaaRecords) > 0
 
 	switch q.Qtype {
 	case dns.TypeA:
@@ -111,7 +113,9 @@ func (p *ZtnetPlugin) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns
 			m.Answer = append(m.Answer, buildAAAA(lookupName, p.cfg.TTL, ip))
 		}
 	case dns.TypeSOA:
-		m.Answer = append(m.Answer, p.soaRecord())
+		if lookupName == p.zone {
+			m.Answer = append(m.Answer, p.soaRecord())
+		}
 	default:
 		// unknown type => NOERROR/NODATA for existing name, NXDOMAIN otherwise
 	}
@@ -147,6 +151,11 @@ func (p *ZtnetPlugin) start(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	p.cancel = cancel
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				clog.Errorf("ztnet: panic in refresh goroutine: %v", r)
+			}
+		}()
 		_ = p.refresh(ctx)
 		t := time.NewTicker(p.cfg.Refresh)
 		defer t.Stop()
@@ -211,7 +220,21 @@ func (p *ZtnetPlugin) refresh(ctx context.Context) error {
 
 	a, aaaa := make(map[string][]net.IP), make(map[string][]net.IP)
 	for _, m := range members {
-		names := []string{dns.Fqdn(strings.ToLower(strings.ReplaceAll(m.Name, " ", "_")) + "." + p.zone), dns.Fqdn(strings.ToLower(m.NodeID) + "." + p.zone)}
+		nodeID := strings.ToLower(strings.TrimSpace(m.NodeID))
+		if nodeID == "" {
+			clog.Warningf("ztnet: member %q has empty nodeID, skipping", m.Name)
+			continue
+		}
+		names := []string{dns.Fqdn(nodeID + "." + p.zone)}
+		if m.Name != "" {
+			normalizedName := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(m.Name), " ", "_"))
+			candidate := normalizedName + "." + p.zone
+			if _, ok := dns.IsDomainName(candidate); ok {
+				names = append(names, dns.Fqdn(candidate))
+			} else {
+				clog.Warningf("ztnet: member name %q is not a valid DNS label, skipping name record", m.Name)
+			}
+		}
 		for _, ipStr := range m.IPAssignments {
 			ip := net.ParseIP(ipStr)
 			if ip == nil {

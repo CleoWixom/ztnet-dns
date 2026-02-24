@@ -172,15 +172,17 @@ check_zerotier() {
 }
 
 check_port_bind() {
+  local ipv4_esc
+  ipv4_esc="${EXITNODE_IPV4//./\.}"
   if [[ "$IPV6_DISABLE" == true ]]; then
     log "Checking port 53 availability on ${EXITNODE_IPV4}"
     local hits
-    hits="$(ss -H -lunpt 2>/dev/null | awk '{print $5}' | rg "^${EXITNODE_IPV4}:53$" || true)"
+    hits="$(ss -H -lunpt 2>/dev/null | awk '{print $5}' | rg "^${ipv4_esc}:53$" || true)"
     [[ -z "$hits" ]] || fail "Port 53 is already in use on IPv4 bind address"
   else
     log "Checking port 53 availability on ${EXITNODE_IPV4} and ${EXITNODE_IPV6}"
     local hits
-    hits="$(ss -H -lunpt 2>/dev/null | awk '{print $5}' | rg "^(${EXITNODE_IPV4}|\[${EXITNODE_IPV6}\]):53$" || true)"
+    hits="$(ss -H -lunpt 2>/dev/null | awk '{print $5}' | rg "^(${ipv4_esc}|\[${EXITNODE_IPV6}\]):53$" || true)"
     [[ -z "$hits" ]] || fail "Port 53 is already in use on one of the bind addresses"
   fi
   ok "Port 53 is free on target bind addresses"
