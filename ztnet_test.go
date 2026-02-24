@@ -64,6 +64,23 @@ func TestCacheSnapshot(t *testing.T) {
 	}
 }
 
+func TestCacheLookupBoth(t *testing.T) {
+	rc := NewRecordCache()
+	rc.Set(
+		map[string][]net.IP{"dual.": {net.ParseIP("10.0.0.1")}},
+		map[string][]net.IP{"dual.": {net.ParseIP("fd00::1")}},
+		mustAllowed(t, "10.0.0.0/8"),
+	)
+
+	a, aaaa := rc.LookupBoth("dual.")
+	if len(a) != 1 || a[0].String() != "10.0.0.1" {
+		t.Fatalf("expected one A record 10.0.0.1, got %v", a)
+	}
+	if len(aaaa) != 1 || aaaa[0].String() != "fd00::1" {
+		t.Fatalf("expected one AAAA record fd00::1, got %v", aaaa)
+	}
+}
+
 func TestCacheConcurrency(t *testing.T) {
 	rc := NewRecordCache()
 	rc.Set(map[string][]net.IP{"a.": {net.ParseIP("10.0.0.1")}}, nil, mustAllowed(t, "10.0.0.0/8"))
