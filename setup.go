@@ -128,6 +128,9 @@ func parse(c *caddy.Controller) (Config, error) {
 	if cfg.APIURL == "" || cfg.NetworkID == "" || cfg.Zone == "." {
 		return cfg, fmt.Errorf("api_url, network_id and zone are required")
 	}
+	if err := validateNetworkID(cfg.NetworkID); err != nil {
+		return cfg, fmt.Errorf("network_id parse: %w", err)
+	}
 	if tokenSources != 1 {
 		return cfg, fmt.Errorf("exactly one token source required")
 	}
@@ -136,4 +139,16 @@ func parse(c *caddy.Controller) (Config, error) {
 	}
 	cfg.SearchDomain = dns.Fqdn(strings.ToLower(cfg.SearchDomain))
 	return cfg, nil
+}
+
+func validateNetworkID(networkID string) error {
+	if len(networkID) != 16 {
+		return fmt.Errorf("must be exactly 16 hex characters, got length %d", len(networkID))
+	}
+	for _, ch := range networkID {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') && (ch < 'A' || ch > 'F') {
+			return fmt.Errorf("must contain only hex characters")
+		}
+	}
+	return nil
 }
