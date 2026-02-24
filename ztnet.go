@@ -140,7 +140,7 @@ func (p *ZtnetPlugin) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns
 
 func (p *ZtnetPlugin) soaRecord() dns.RR {
 	return &dns.SOA{Hdr: dns.RR_Header{Name: p.zone, Rrtype: dns.TypeSOA, Class: dns.ClassINET, Ttl: p.cfg.TTL},
-		Ns: "ns1." + p.zone, Mbox: "hostmaster." + p.zone, Serial: uint32(time.Now().Unix()), Refresh: 3600, Retry: 600, Expire: 86400, Minttl: p.cfg.TTL}
+		Ns: "ns1." + p.zone, Mbox: "hostmaster." + p.zone, Serial: p.cache.Serial(), Refresh: 3600, Retry: 600, Expire: 86400, Minttl: p.cfg.TTL}
 }
 
 func (p *ZtnetPlugin) start(ctx context.Context) {

@@ -148,6 +148,78 @@ func TestServeDNS_NXDOMAIN(t *testing.T) {
 	}
 }
 
+func TestServeDNS_NXDOMAIN_SerialStableUntilRefresh(t *testing.T) {
+	var round atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/network/n/member":
+			if round.Load() == 0 {
+				_, _ = w.Write([]byte(`[{"nodeId":"a","name":"srv","authorized":true,"ipAssignments":["10.147.20.5"]}]`))
+			} else {
+				_, _ = w.Write([]byte(`[{"nodeId":"b","name":"srv2","authorized":true,"ipAssignments":["10.147.20.6"]}]`))
+			}
+			return
+		case "/api/v1/network/n":
+			_, _ = w.Write([]byte(`{"config":{"routes":[]}}`))
+			return
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	p := &ZtnetPlugin{
+		zone:  "zt.example.com.",
+		cfg:   Config{TTL: 60, Token: TokenConfig{Source: "inline", Value: "tok"}, Timeout: time.Second, AllowedCIDRs: []string{"10.147.0.0/16"}},
+		cache: NewRecordCache(),
+		api:   &APIClient{BaseURL: ts.URL, NetworkID: "n", HTTPClient: ts.Client(), MaxRetries: 0},
+		Next:  nextOK{},
+	}
+	if err := p.refresh(context.Background()); err != nil {
+		t.Fatalf("initial refresh: %v", err)
+	}
+
+	rw1 := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 1111}}
+	req := new(dns.Msg)
+	req.SetQuestion("missing.zt.example.com.", dns.TypeA)
+	if rcode, err := p.ServeDNS(context.Background(), rw1, req); err != nil || rcode != dns.RcodeNameError {
+		t.Fatalf("first NXDOMAIN failed: rcode=%d err=%v", rcode, err)
+	}
+	soa1, ok := rw1.msg.Ns[0].(*dns.SOA)
+	if !ok {
+		t.Fatalf("expected SOA in authority, got %T", rw1.msg.Ns[0])
+	}
+
+	rw2 := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 2222}}
+	if rcode, err := p.ServeDNS(context.Background(), rw2, req); err != nil || rcode != dns.RcodeNameError {
+		t.Fatalf("second NXDOMAIN failed: rcode=%d err=%v", rcode, err)
+	}
+	soa2, ok := rw2.msg.Ns[0].(*dns.SOA)
+	if !ok {
+		t.Fatalf("expected SOA in authority, got %T", rw2.msg.Ns[0])
+	}
+	if soa1.Serial != soa2.Serial {
+		t.Fatalf("expected stable serial without refresh, got %d and %d", soa1.Serial, soa2.Serial)
+	}
+
+	round.Store(1)
+	if err := p.refresh(context.Background()); err != nil {
+		t.Fatalf("second refresh: %v", err)
+	}
+
+	rw3 := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 3333}}
+	if rcode, err := p.ServeDNS(context.Background(), rw3, req); err != nil || rcode != dns.RcodeNameError {
+		t.Fatalf("third NXDOMAIN failed: rcode=%d err=%v", rcode, err)
+	}
+	soa3, ok := rw3.msg.Ns[0].(*dns.SOA)
+	if !ok {
+		t.Fatalf("expected SOA in authority, got %T", rw3.msg.Ns[0])
+	}
+	if soa3.Serial == soa2.Serial {
+		t.Fatalf("expected serial to change after refresh, still %d", soa3.Serial)
+	}
+}
+
 func TestServeDNS_UnknownType_NODATA(t *testing.T) {
 	p := basePlugin(t)
 	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 1111}}
