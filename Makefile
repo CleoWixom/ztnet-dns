@@ -10,9 +10,9 @@ DESTDIR ?=
 GO ?= go
 GOFLAGS ?=
 PKG ?= ./...
-LDFLAGS ?= -X github.com/CleoWixom/ztnet-dns.PluginVersion=$(VERSION)
+LDFLAGS ?= -X main.PluginVersion=$(VERSION)
 
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION := $(shell git describe --tags --always --dirty)
 
 COREDNS_VERSION ?= v1.14.0
 COREDNS_REPO ?= https://github.com/coredns/coredns.git
@@ -46,7 +46,7 @@ help:
 	@echo "  clean          - Remove temporary CoreDNS workdir"
 
 version:
-	@echo "ztnet-dns version: $(VERSION)"
+	@echo $(VERSION)
 
 install-deps:
 	sudo apt-get update
@@ -129,7 +129,7 @@ install-config:
 
 install-helper:
 	install -d "$(DESTDIR)$(BINDIR)"
-	install -m 0755 scripts/ztnet.token.install "$(DESTDIR)$(BINDIR)/ztnet.token.install"
+	install -m 0755 scripts/ztnetool "$(DESTDIR)$(BINDIR)/ztnetool"
 
 install-service:
 	@if [ -n "$(DESTDIR)" ]; then \
