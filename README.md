@@ -5,7 +5,7 @@ Secure CoreDNS external plugin for serving ZeroTier member DNS records (A/AAAA) 
 ## Run installer directly from GitHub
 
 ```bash
-sudo bash <(curl -fsSL https://raw.githubusercontent.com/CleoWixom/ztnet-dns/main/scripts/install)
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/CleoWixom/ztnet-dns/main/install)
 ```
 
 ## Quick features
@@ -63,18 +63,27 @@ sudo ztnetool -l --api-url http://127.0.0.1:3000
 sudo ztnetool -n 8056c2e21c000001 --api-url http://127.0.0.1:3000
 ```
 
-## Installer flow (`scripts/install`)
+## Installer flow (`install`)
+
+
+Installer flags:
+
+- `--delete` — removes installed files and service from system (requires confirmation: `Yes` or `Y`).
+- `--ipv6_disable` — generates Corefile without IPv6 bind/hosts records.
+- `--zt_full` — full install mode with ZeroTier One installation (if needed) and service patching.
 
 Installer behavior:
 
 1. Collects required values (`API_URL`, API token, `NETWORK_ID`, `ZONE`).
-2. Optionally asks for advanced parameters (`NODE_IPV4`, `NODE_IPV6`, `AUTO_ALLOW_ZT`, `REFRESH`, `TIMEOUT`, `TTL`, `DNS_UPSTREAM`).
+2. Optionally asks for advanced parameters (`EXITNODE_IPV4`, `EXITNODE_IPV6`, `AUTO_ALLOW_ZT`, `REFRESH`, `TIMEOUT`, `TTL`, `DNS_UPSTREAM`).
 3. Installs dependencies:
    - `apt-get update`
-   - `apt-get install -y git make build-essential ca-certificates curl dnsutils net-tools iproute2 golang`
+   - `apt-get install -y git make build-essential ca-certificates curl dnsutils net-tools iproute2 golang gnupg`
 4. Ensures `coredns:coredns` user/group exists.
-5. Validates `zerotier-one` and applies `-U` patch to `/lib/systemd/system/zerotier-one.service` if required.
-6. Checks port `53` availability on selected bind addresses.
+5. Checks `zerotier-one` availability.
+   - default mode: expects ZeroTier One already installed
+   - `--zt_full`: installs ZeroTier One if missing and patches `/lib/systemd/system/zerotier-one.service` with `-U`
+6. Checks port `53` availability on selected bind addresses (`--ipv6_disable` checks only IPv4).
 7. Builds/installs CoreDNS with plugin and writes `/etc/coredns/Corefile`.
 8. Saves token through `ztnetool` into `/run/secrets/ztnet_token`.
 9. Validates API (`ztnetool -c`) and starts `coredns-ztnet.service`.
@@ -83,10 +92,10 @@ Generated Corefile template:
 
 ```corefile
 {$ZONE} {
-    bind {$NODE_IPV4} {$NODE_IPV6}
+    bind {$EXITNODE_IPV4} {$EXITNODE_IPV6}
     hosts {
-        {$NODE_IPV4} {$ZONE}
-        {$NODE_IPV6} {$ZONE}
+        {$EXITNODE_IPV4} {$ZONE}
+        {$EXITNODE_IPV6} {$ZONE}
     }
     ztnet {
         api_url {$API_URL}
@@ -104,7 +113,7 @@ Generated Corefile template:
 }
 
 . {
-    bind 127.0.0.1 {$NODE_IPV4} {$NODE_IPV6}
+    bind 127.0.0.1 {$EXITNODE_IPV4} {$EXITNODE_IPV6}
     forward . {$DNS_UPSTREAM}
     cache
 }

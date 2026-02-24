@@ -3,10 +3,13 @@ set -euo pipefail
 
 REPO_URL="https://github.com/CleoWixom/ztnet-dns.git"
 WORKDIR=""
+DELETE_MODE=false
+IPV6_DISABLE=false
+ZT_FULL=false
 
 export ZONE="${ZONE:-ztnet.local}"
-export NODE_IPV4="${NODE_IPV4:-192.168.55.1}"
-export NODE_IPV6="${NODE_IPV6:-fc4e:1d7b:a5ac:d8cf:20e2::1}"
+export EXITNODE_IPV4="${EXITNODE_IPV4:-192.168.55.1}"
+export EXITNODE_IPV6="${EXITNODE_IPV6:-fc4e:1d7b:a5ac:d8cf:20e2::1}"
 export API_URL="${API_URL:-http://127.0.0.1:3000}"
 export NETWORK_ID="${NETWORK_ID:-8056c2e21c000001}"
 export FILE_TOKEN="${FILE_TOKEN:-/run/secrets/ztnet_token}"
@@ -34,6 +37,57 @@ trap cleanup EXIT
 
 require_cmd() { command -v "$1" >/dev/null 2>&1 || fail "Required command not found: $1"; }
 ensure_root() { [[ "$EUID" -eq 0 ]] || fail "Run installer with sudo/root"; }
+
+usage() {
+  cat <<USAGE
+Usage: $0 [options]
+
+Options:
+  --delete        Remove coredns-ztnet from system (requires Yes/Y confirmation)
+  --ipv6_disable  Disable IPv6 bind/hosts configuration in generated Corefile
+  --zt_full       Full install: install ZeroTier One if missing + patch service with -U
+  -h, --help      Show this help
+USAGE
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --delete) DELETE_MODE=true ;;
+      --ipv6_disable) IPV6_DISABLE=true ;;
+      --zt_full) ZT_FULL=true ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *) fail "Unknown argument: $1" ;;
+    esac
+    shift
+  done
+}
+
+confirm_delete() {
+  local answer=""
+  read -r -p "Type Yes or Y to confirm deletion: " answer
+  case "$answer" in
+    Yes|Y) return 0 ;;
+    *) fail "Deletion cancelled by user" ;;
+  esac
+}
+
+run_delete() {
+  confirm_delete
+  log "Removing coredns-ztnet installation"
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl disable --now coredns-ztnet.service || true
+    systemctl daemon-reload || true
+  fi
+  rm -f /usr/sbin/coredns
+  rm -f /usr/bin/ztnetool
+  rm -f /lib/systemd/system/coredns-ztnet.service
+  rm -rf /etc/coredns
+  ok "coredns-ztnet removed"
+}
 
 prompt_required() {
   local var_name="$1" prompt="$2" value=""
@@ -67,17 +121,40 @@ ensure_coredns_identity() {
   ok "User/group coredns:coredns is ready"
 }
 
+install_zerotier() {
+  log "Installing ZeroTier One"
+  curl -s 'https://raw.githubusercontent.com/zerotier/ZeroTierOne/main/doc/contact%40zerotier.com.gpg' | gpg --import
+  local z
+  z="$(curl -s 'https://install.zerotier.com/' | gpg)"
+  [[ -n "$z" ]] || fail "Failed to retrieve signed ZeroTier install script"
+  echo "$z" | bash
+  ok "ZeroTier One installed"
+}
+
 install_dependencies() {
   log "Installing dependencies"
   apt-get update
-  apt-get install -y git make build-essential ca-certificates curl dnsutils net-tools iproute2 golang
+  apt-get install -y git make build-essential ca-certificates curl dnsutils net-tools iproute2 golang gnupg
   ok "Dependencies installed"
 }
 
 check_zerotier() {
   if ! command -v zerotier-one >/dev/null 2>&1; then
-    fail "zerotier-one is not installed. Install ZeroTier One first:\ncurl -s 'https://raw.githubusercontent.com/zerotier/ZeroTierOne/main/doc/contact%40zerotier.com.gpg' | gpg --import && \\
-if z=$(curl -s 'https://install.zerotier.com/' | gpg); then echo \"$z\" | sudo bash; fi"
+    if [[ "$ZT_FULL" == true ]]; then
+      install_zerotier
+    else
+      fail "zerotier-one is not installed. Re-run with --zt_full for full installation"
+    fi
+  fi
+
+  local svc="/lib/systemd/system/zerotier-one.service"
+  [[ -f "$svc" ]] || fail "Service file not found: $svc"
+
+  if [[ "$ZT_FULL" == true ]] && ! rg -q '/usr/sbin/zerotier-one -U' "$svc"; then
+    log "Patching zerotier-one.service with -U"
+    sed -i 's#/usr/sbin/zerotier-one#/usr/sbin/zerotier-one -U#g' "$svc"
+    systemctl daemon-reload
+    systemctl restart zerotier-one.service
   fi
 
   if ifconfig 2>/dev/null | rg -q '^zt'; then
@@ -85,29 +162,27 @@ if z=$(curl -s 'https://install.zerotier.com/' | gpg); then echo \"$z\" | sudo b
     return 0
   fi
 
-  local svc="/lib/systemd/system/zerotier-one.service"
-  [[ -f "$svc" ]] || fail "Service file not found: $svc"
-
-  if ! rg -q '/usr/sbin/zerotier-one -U' "$svc"; then
-    log "Patching zerotier-one.service with -U"
-    sed -i 's#/usr/sbin/zerotier-one#/usr/sbin/zerotier-one -U#g' "$svc"
-  fi
-
-  systemctl daemon-reload
   systemctl restart zerotier-one.service
   sleep 2
   if ! ifconfig 2>/dev/null | rg -q '^zt'; then
-    fail "ZeroTier interface zt* is still missing after patch/restart"
+    fail "ZeroTier interface zt* is missing"
   fi
 
   ok "ZeroTier service checked and zt* interface is available"
 }
 
 check_port_bind() {
-  log "Checking port 53 availability on ${NODE_IPV4} and ${NODE_IPV6}"
-  local hits
-  hits="$(ss -H -lunpt 2>/dev/null | awk '{print $5}' | rg "^(${NODE_IPV4}|\[${NODE_IPV6}\]):53$" || true)"
-  [[ -z "$hits" ]] || fail "Port 53 is already in use on one of the bind addresses"
+  if [[ "$IPV6_DISABLE" == true ]]; then
+    log "Checking port 53 availability on ${EXITNODE_IPV4}"
+    local hits
+    hits="$(ss -H -lunpt 2>/dev/null | awk '{print $5}' | rg "^${EXITNODE_IPV4}:53$" || true)"
+    [[ -z "$hits" ]] || fail "Port 53 is already in use on IPv4 bind address"
+  else
+    log "Checking port 53 availability on ${EXITNODE_IPV4} and ${EXITNODE_IPV6}"
+    local hits
+    hits="$(ss -H -lunpt 2>/dev/null | awk '{print $5}' | rg "^(${EXITNODE_IPV4}|\[${EXITNODE_IPV6}\]):53$" || true)"
+    [[ -z "$hits" ]] || fail "Port 53 is already in use on one of the bind addresses"
+  fi
   ok "Port 53 is free on target bind addresses"
 }
 
@@ -123,8 +198,10 @@ collect_inputs() {
   local extra=""
   prompt_default extra "5) Configure additional parameters? [Yes/No]" "No"
   if [[ "${extra,,}" == "yes" || "${extra,,}" == "y" ]]; then
-    prompt_default NODE_IPV4 "6) NODE_IPV4" "192.168.55.1"
-    prompt_default NODE_IPV6 "7) NODE_IPV6" "fc4e:1d7b:a5ac:d8cf:20e2::1"
+    prompt_default EXITNODE_IPV4 "6) EXITNODE_IPV4" "192.168.55.1"
+    if [[ "$IPV6_DISABLE" == false ]]; then
+      prompt_default EXITNODE_IPV6 "7) EXITNODE_IPV6" "fc4e:1d7b:a5ac:d8cf:20e2::1"
+    fi
     prompt_default AUTO_ALLOW_ZT "8) AUTO_ALLOW_ZT [true/false]" "true"
     validate_bool "$AUTO_ALLOW_ZT" || fail "AUTO_ALLOW_ZT must be true or false"
     prompt_default REFRESH "9) REFRESH" "30s"
@@ -135,14 +212,24 @@ collect_inputs() {
 }
 
 write_corefile() {
+  local bind_addrs host_entries root_bind
+  if [[ "$IPV6_DISABLE" == true ]]; then
+    bind_addrs="${EXITNODE_IPV4}"
+    host_entries="        ${EXITNODE_IPV4} ${ZONE}"
+    root_bind="127.0.0.1 ${EXITNODE_IPV4}"
+  else
+    bind_addrs="${EXITNODE_IPV4} ${EXITNODE_IPV6}"
+    host_entries="        ${EXITNODE_IPV4} ${ZONE}\n        ${EXITNODE_IPV6} ${ZONE}"
+    root_bind="127.0.0.1 ${EXITNODE_IPV4} ${EXITNODE_IPV6}"
+  fi
+
   log "Writing /etc/coredns/Corefile"
   install -d -m 0750 /etc/coredns
   cat > /etc/coredns/Corefile <<CORE
 ${ZONE} {
-    bind ${NODE_IPV4} ${NODE_IPV6}
+    bind ${bind_addrs}
     hosts {
-        ${NODE_IPV4} ${ZONE}
-        ${NODE_IPV6} ${ZONE}
+$(printf "%b\n" "$host_entries")
     }
     ztnet {
         api_url ${API_URL}
@@ -160,7 +247,7 @@ ${ZONE} {
 }
 
 . {
-    bind 127.0.0.1 ${NODE_IPV4} ${NODE_IPV6}
+    bind ${root_bind}
     forward . ${DNS_UPSTREAM}
     cache
 }
@@ -195,7 +282,14 @@ start_service() {
 }
 
 main() {
+  parse_args "$@"
   ensure_root
+
+  if [[ "$DELETE_MODE" == true ]]; then
+    run_delete
+    return 0
+  fi
+
   require_cmd rg
   require_cmd ss
   require_cmd ifconfig

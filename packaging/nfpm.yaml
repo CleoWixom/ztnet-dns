@@ -53,7 +53,7 @@ contents:
 
 
   # ── Helper script for secure token install/rotation ─────────────────────
-  - src: scripts/ztnetool
+  - src: packaging/ztnetool
     dst: /usr/bin/ztnetool
     file_info:
       mode: 0755
