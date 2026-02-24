@@ -79,7 +79,7 @@ func parse(c *caddy.Controller) (Config, error) {
 			case "allowed_networks":
 				cfg.AllowedCIDRs = append(cfg.AllowedCIDRs, args...)
 			case "ttl":
-				v, err := strconv.Atoi(args[0])
+				v, err := strconv.ParseUint(args[0], 10, 32)
 				if err != nil {
 					return cfg, fmt.Errorf("ttl parse: %w", err)
 				}
