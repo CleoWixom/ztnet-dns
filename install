@@ -157,14 +157,15 @@ check_zerotier() {
     systemctl restart zerotier-one.service
   fi
 
-  if ifconfig 2>/dev/null | rg -q '^zt'; then
+  if ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | rg -q '^zt'; then
     ok "ZeroTier interface zt* is present"
     return 0
   fi
 
+  warn "ZeroTier interface zt* not found in ip link, restarting service and rechecking"
   systemctl restart zerotier-one.service
   sleep 2
-  if ! ifconfig 2>/dev/null | rg -q '^zt'; then
+  if ! ip -o addr show 2>/dev/null | awk '{print $2}' | rg -q '^zt'; then
     fail "ZeroTier interface zt* is missing"
   fi
 
@@ -297,7 +298,7 @@ main() {
 
   require_cmd rg
   require_cmd ss
-  require_cmd ifconfig
+  require_cmd ip
   require_cmd systemctl
 
   ensure_coredns_identity
