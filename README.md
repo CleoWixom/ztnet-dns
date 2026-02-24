@@ -127,6 +127,19 @@ Generated Corefile template:
 }
 ```
 
+
+## Packaging runtime paths
+
+`nfpm` package now installs only paths used directly at runtime:
+
+- `/usr/sbin/coredns` — service binary (`ExecStart`).
+- `/etc/coredns/Corefile` — plugin/service configuration.
+- `/usr/bin/ztnetool` — token install/check helper.
+- `/lib/systemd/system/coredns-ztnet.service` — systemd unit.
+
+Token directory `/run/secrets` is **not** shipped as a static package directory because `/run` is runtime tmpfs.
+`ztnetool` creates the token directory path (default `/run/secrets`) on demand with secure permissions when writing token files.
+
 ## Build from source
 
 Build instructions moved to [`BUILD.md`](BUILD.md).
