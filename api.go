@@ -104,6 +104,29 @@ func waitRetry(ctx context.Context, delay time.Duration) error {
 	}
 }
 
+func retryDelay(resp *http.Response, fallback time.Duration) time.Duration {
+	retryAfter := strings.TrimSpace(resp.Header.Get("Retry-After"))
+	if retryAfter == "" {
+		return fallback
+	}
+
+	if secs, err := time.ParseDuration(retryAfter + "s"); err == nil {
+		if secs > 0 {
+			return secs
+		}
+		return fallback
+	}
+
+	if at, err := http.ParseTime(retryAfter); err == nil {
+		d := time.Until(at)
+		if d > 0 {
+			return d
+		}
+	}
+
+	return fallback
+}
+
 func (c *APIClient) getJSON(ctx context.Context, token, path string, out any) error {
 	url := strings.TrimRight(c.BaseURL, "/") + path
 	for i := 0; i <= c.MaxRetries; i++ {
@@ -131,6 +154,18 @@ func (c *APIClient) getJSON(ctx context.Context, token, path string, out any) er
 			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
 			return ErrUnauthorized
+		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			if i == c.MaxRetries {
+				return fmt.Errorf("GET %s status %d after %d retries", path, resp.StatusCode, c.MaxRetries)
+			}
+			delay := retryDelay(resp, time.Duration(i+1)*100*time.Millisecond)
+			if err := waitRetry(ctx, delay); err != nil {
+				return err
+			}
+			continue
 		}
 		if resp.StatusCode >= 500 {
 			_, _ = io.Copy(io.Discard, resp.Body)
