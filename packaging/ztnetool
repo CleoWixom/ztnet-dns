@@ -127,18 +127,63 @@ check_token_and_api() {
 
 list_controllers() {
   local token="$1"
+  local primary_endpoint="/api/v1/network"
+  local fallback_endpoint="/api/v1/controller/network"
+  local tmp_body status
+
+  tmp_body="$(mktemp)"
+  trap 'rm -f "$tmp_body"' RETURN
+
   info "Fetching network list..."
 
-  if api_get "/api/v1/network" "$token" 2>/dev/null; then
+  status="$(curl -sS --connect-timeout 5 --max-time 20 -o "$tmp_body" -w '%{http_code}' -H "x-ztnet-auth: ${token}" "${API_URL%/}${primary_endpoint}" || echo '000')"
+
+  if [[ "$status" == "200" ]]; then
+    cat "$tmp_body"
     printf '\n'
-    ok "Network list received"
+    ok "Network list received from ${primary_endpoint}"
     return 0
   fi
 
-  warn "Endpoint /api/v1/network unavailable, trying /api/v1/controller/network"
-  api_get "/api/v1/controller/network" "$token"
-  printf '\n'
-  ok "Controller/network list received"
+  case "$status" in
+    404)
+      warn "Endpoint ${primary_endpoint} returned HTTP 404, trying fallback ${fallback_endpoint}"
+      ;;
+    401|403)
+      die "Access denied at ${primary_endpoint} (HTTP ${status}); fallback is disabled for authentication/authorization errors"
+      ;;
+    5??)
+      die "Server error from ${primary_endpoint} (HTTP ${status}); fallback is disabled for 5xx responses"
+      ;;
+    000)
+      die "Cannot reach API endpoint ${primary_endpoint} at ${API_URL}"
+      ;;
+    *)
+      die "Unexpected response from ${primary_endpoint}: HTTP ${status}; fallback is only allowed for HTTP 404"
+      ;;
+  esac
+
+  status="$(curl -sS --connect-timeout 5 --max-time 20 -o "$tmp_body" -w '%{http_code}' -H "x-ztnet-auth: ${token}" "${API_URL%/}${fallback_endpoint}" || echo '000')"
+
+  case "$status" in
+    200)
+      cat "$tmp_body"
+      printf '\n'
+      ok "Controller/network list received from ${fallback_endpoint}"
+      ;;
+    401|403)
+      die "Access denied at fallback endpoint ${fallback_endpoint} (HTTP ${status})"
+      ;;
+    5??)
+      die "Server error from fallback endpoint ${fallback_endpoint} (HTTP ${status})"
+      ;;
+    000)
+      die "Cannot reach fallback endpoint ${fallback_endpoint} at ${API_URL}"
+      ;;
+    *)
+      die "Fallback endpoint ${fallback_endpoint} returned unexpected HTTP ${status}"
+      ;;
+  esac
 }
 
 show_network_or_node() {
