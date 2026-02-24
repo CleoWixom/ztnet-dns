@@ -827,6 +827,28 @@ func TestFetchNetwork_RetryStopsOnContextCancel(t *testing.T) {
 	}
 }
 
+func TestAPIClient_RetryDelayAndContextHandling(t *testing.T) {
+	c := &APIClient{MaxRetries: 10, Jitter: func(max time.Duration) time.Duration {
+		if max <= 0 {
+			t.Fatalf("unexpected jitter max: %s", max)
+		}
+		return max
+	}}
+
+	if got, want := c.retryDelay(0), 150*time.Millisecond; got != want {
+		t.Fatalf("attempt 0 delay: got %s, want %s", got, want)
+	}
+	if got, want := c.retryDelay(4), 2400*time.Millisecond; got != want {
+		t.Fatalf("attempt 4 delay with cap: got %s, want %s", got, want)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := waitRetry(ctx, time.Second); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled from waitRetry, got %v", err)
+	}
+}
+
 func TestRefresh_TokenRotation(t *testing.T) {
 	var seenMu sync.Mutex
 	seen := make([]string, 0, 4)
