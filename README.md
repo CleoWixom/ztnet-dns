@@ -57,11 +57,19 @@ Options:
 Examples:
 
 ```bash
-sudo ztnetool -t "<ZTNET_API_TOKEN>"
+# interactive input (recommended)
+sudo ztnetool -t
+
+# or load token from file without exposing it in argv
+sudo sh -c 'ztnetool -t "$(cat /run/secrets/ztnet_token)"'
+
 sudo ztnetool -c --api-url http://127.0.0.1:3000 --network-id 8056c2e21c000001
 sudo ztnetool -l --api-url http://127.0.0.1:3000
 sudo ztnetool -n 8056c2e21c000001 --api-url http://127.0.0.1:3000
 ```
+
+> ⚠️ Do not pass API tokens directly as command-line arguments in normal usage.
+> Values in `argv` can be exposed via process listings (`ps`) and `/proc/<pid>/cmdline`.
 
 ## Installer flow (`install`)
 
