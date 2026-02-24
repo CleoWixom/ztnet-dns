@@ -134,7 +134,7 @@ golangci-lint run ./...
 
 - Version is derived from git (`make version`).
 - No manual VERSION file or manual tags.
-- Releases are automated by GitHub Actions when changes reach `main` (direct push or PR merge commit).
+- Releases are automated by GitHub Actions only after a successful `CI` run on `main` (single test source of truth per SHA).
 - Commit markers control semantic bump:
   - `#patch` (or omitted) → patch
   - `#minor` → minor
