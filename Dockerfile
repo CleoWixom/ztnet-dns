@@ -1,8 +1,10 @@
 FROM golang:1.24.13 AS build
 WORKDIR /src
 COPY . .
-RUN go mod tidy && go test ./... && go build -o /out/ztnet-dns ./...
+RUN go mod tidy && \
+    go test ./... && \
+    make build-coredns
 
 FROM gcr.io/distroless/base-debian12
-COPY --from=build /out/ztnet-dns /usr/local/bin/ztnet-dns
-ENTRYPOINT ["/usr/local/bin/ztnet-dns"]
+COPY --from=build /tmp/coredns-ztnet-build/coredns /usr/local/bin/coredns
+ENTRYPOINT ["/usr/local/bin/coredns"]
