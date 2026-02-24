@@ -228,12 +228,63 @@ func TestLoadToken_HotRotation(t *testing.T) {
 	}
 }
 
+func TestLoadToken_File_Empty(t *testing.T) {
+	fp := filepath.Join(t.TempDir(), "tok")
+	if err := os.WriteFile(fp, []byte(" \n\t "), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadToken(TokenConfig{Source: TokenSourceFile, Value: fp}); err == nil {
+		t.Fatal("expected empty file error")
+	}
+}
+
+func TestLoadToken_File_Missing(t *testing.T) {
+	fp := filepath.Join(t.TempDir(), "missing-token")
+	if _, err := LoadToken(TokenConfig{Source: TokenSourceFile, Value: fp}); err == nil {
+		t.Fatal("expected missing file error")
+	}
+}
+
+func TestLoadToken_Env_Unset(t *testing.T) {
+	const envName = "ZTNET_TEST_UNSET_TOKEN"
+	t.Setenv(envName, "")
+	if _, err := LoadToken(TokenConfig{Source: TokenSourceEnv, Value: envName}); err == nil {
+		t.Fatal("expected unset env error")
+	}
+}
+
 func TestComputeInvalidLengths(t *testing.T) {
 	if _, err := ComputeRFC4193("17d3", "efcc1b0947"); err == nil {
 		t.Fatal("expected networkID length error")
 	}
 	if _, err := Compute6plane("17d395d8cb43a800", "ef"); err == nil {
 		t.Fatal("expected nodeID length error")
+	}
+}
+
+func TestComputeRFC4193(t *testing.T) {
+	ip, err := ComputeRFC4193("17d395d8cb43a800", "efcc1b0947")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := ip.String(); got != "fd96:3fe2:4d62:efcc:1b09:4700::" {
+		t.Fatalf("unexpected RFC4193 value: %s", got)
+	}
+}
+
+func TestCompute6plane(t *testing.T) {
+	ip, err := Compute6plane("17d395d8cb43a800", "efcc1b0947")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := ip.String(); got != "fc17:d395:d8ef:cc1b:947::" {
+		t.Fatalf("unexpected 6plane value: %s", got)
+	}
+}
+
+func TestAllowedNets_InvalidCIDR(t *testing.T) {
+	if _, err := NewAllowedNets([]string{"not-a-cidr"}); err == nil {
+		t.Fatal("expected invalid CIDR error")
 	}
 }
 
@@ -254,6 +305,29 @@ func TestFetchMembers_Success(t *testing.T) {
 	ms, err := c.FetchMembers(context.Background(), "t")
 	if err != nil || len(ms) != 1 {
 		t.Fatalf("%v %d", err, len(ms))
+	}
+}
+
+func TestFetchMembers_OnlyAuthorized(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/network/n/member" {
+			w.WriteHeader(404)
+			return
+		}
+		_, _ = w.Write([]byte(`[
+			{"nodeId":"a","name":"srv-a","authorized":true,"ipAssignments":["10.0.0.2"]},
+			{"nodeId":"b","name":"srv-b","authorized":false,"ipAssignments":["10.0.0.3"]}
+		]`))
+	}))
+	defer ts.Close()
+
+	c := &APIClient{BaseURL: ts.URL, NetworkID: "n", HTTPClient: ts.Client(), MaxRetries: 1}
+	ms, err := c.FetchMembers(context.Background(), "t")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ms) != 1 || ms[0].NodeID != "a" {
+		t.Fatalf("expected only authorized member, got %#v", ms)
 	}
 }
 
@@ -455,6 +529,9 @@ func TestRefresh_StaleAllowedOnBuildError(t *testing.T) {
 	if !p.cache.IsAllowed(net.ParseIP("10.66.1.20"), true) {
 		t.Fatal("expected stale allowlist to remain on build error")
 	}
+	if len(p.cache.LookupA("srv.zt.example.com.")) == 0 {
+		t.Fatal("expected stale DNS records to remain on build error")
+	}
 }
 
 func TestCache_SetIsAllowed_Atomic(t *testing.T) {
@@ -560,31 +637,61 @@ func TestServeDNS_DNSSD_TXT(t *testing.T) {
 	}
 }
 
-func TestServeDNS_ShortName_Passthrough(t *testing.T) {
+func TestServeDNS_ShortName_AllowShort_OutOfZonePassthrough(t *testing.T) {
 	p := basePlugin(t)
 	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 1111}}
 	req := new(dns.Msg)
 	req.SetQuestion("server01.", dns.TypeA)
 	rcode, err := p.ServeDNS(context.Background(), rw, req)
 	if err != nil || rcode != dns.RcodeSuccess {
-		t.Fatalf("expected passthrough shortname query, got rcode=%d err=%v", rcode, err)
+		t.Fatalf("expected out-of-zone short-name passthrough, got rcode=%d err=%v", rcode, err)
 	}
 	if rw.msg != nil {
-		t.Fatal("shortname out-of-zone query should be handled by next plugin")
+		t.Fatal("out-of-zone short-name should be handled by next plugin")
 	}
 }
 
-func TestServeDNS_ShortName_MissPassthrough(t *testing.T) {
+func TestServeDNS_ShortName_AllowShort_MissPassthrough(t *testing.T) {
 	p := basePlugin(t)
 	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 1111}}
 	req := new(dns.Msg)
 	req.SetQuestion("unknown.", dns.TypeA)
 	rcode, err := p.ServeDNS(context.Background(), rw, req)
 	if err != nil || rcode != dns.RcodeSuccess {
-		t.Fatalf("expected passthrough for missing short name, got rcode=%d err=%v", rcode, err)
+		t.Fatalf("expected passthrough for missing short-name, got rcode=%d err=%v", rcode, err)
 	}
 	if rw.msg != nil {
-		t.Fatal("missing short name should pass to next plugin")
+		t.Fatal("missing short-name should pass to next plugin")
+	}
+}
+
+func TestServeDNS_ShortName_Off(t *testing.T) {
+	p := basePlugin(t)
+	p.cfg.AllowShort = false
+	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 1111}}
+	req := new(dns.Msg)
+	req.SetQuestion("server01.", dns.TypeA)
+	rcode, err := p.ServeDNS(context.Background(), rw, req)
+	if err != nil || rcode != dns.RcodeSuccess {
+		t.Fatalf("expected out-of-zone passthrough when short names disabled, got rcode=%d err=%v", rcode, err)
+	}
+	if rw.msg != nil {
+		t.Fatal("short name should stay out-of-zone and pass to next plugin")
+	}
+}
+
+func TestServeDNS_AllowShort_DoesNotChangeInZoneMiss(t *testing.T) {
+	p := basePlugin(t)
+	p.cfg.AllowShort = true
+	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 1111}}
+	req := new(dns.Msg)
+	req.SetQuestion("unknown.zt.example.com.", dns.TypeA)
+	rcode, err := p.ServeDNS(context.Background(), rw, req)
+	if err != nil || rcode != dns.RcodeNameError {
+		t.Fatalf("expected NXDOMAIN for in-zone miss, got rcode=%d err=%v", rcode, err)
+	}
+	if rw.msg == nil || len(rw.msg.Ns) == 0 {
+		t.Fatal("expected SOA in authority for in-zone miss")
 	}
 }
 
