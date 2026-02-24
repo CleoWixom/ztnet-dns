@@ -204,8 +204,8 @@ Every change must maintain or improve test coverage. Tests live in `ztnet_test.g
 - `TestLoadToken_*` — file (trim whitespace), env, inline, empty file, missing file, hot-rotation
 
 **Unit — IPv6:**
-- `TestComputeRFC4193` — reference vector: `efcc1b0947` / `17d395d8cb43a800` → `fd17:d395:...`
-- `TestCompute6plane` — reference vector → `fc1c:903d:...`
+- `TestComputeRFC4193` — reference vector: `networkID=17d395d8cb43a800`, `nodeID=efcc1b0947` → `fd96:3fe2:4d62:efcc:1b09:4700::`
+- `TestCompute6plane` — reference vector: `networkID=17d395d8cb43a800`, `nodeID=efcc1b0947` → `fc17:d395:d8ef:cc1b:947::`
 
 **Unit — ServeDNS flow:**
 - `TestServeDNS_A`, `_AAAA`, `_ANY`, `_SOA`, `_NXDOMAIN`, `_OutOfZone`, `_NoQuestion`

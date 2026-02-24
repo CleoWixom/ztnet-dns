@@ -6,7 +6,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
+User=coredns
+Group=coredns
 ExecStart=/usr/sbin/coredns -conf /etc/coredns/Corefile
 ExecReload=/bin/kill -USR1 $MAINPID
 
@@ -20,7 +21,6 @@ SyslogIdentifier=coredns-ztnet
 
 # Hardening
 ProtectSystem=strict
-ReadWritePaths=/var/lib/coredns
 PrivateTmp=true
 NoNewPrivileges=true
 # Required for CAP_NET_BIND_SERVICE (port 53), granted via setcap in postinstall

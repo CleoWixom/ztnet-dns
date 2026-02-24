@@ -37,7 +37,7 @@ jobs:
           cache: true
 
       - name: Run tests
-        run: go test ./...
+        run: go test ./... -race -count=1 -timeout=120s
 
       - name: Create tag (default patch; support #major/#minor/#patch)
         id: tag

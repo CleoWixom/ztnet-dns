@@ -69,6 +69,19 @@ func TestCacheConcurrency(t *testing.T) {
 	wg.Wait()
 }
 
+func TestCacheLen(t *testing.T) {
+	rc := NewRecordCache()
+	rc.Set(
+		map[string][]net.IP{"a.": {net.ParseIP("10.0.0.1")}, "b.": {net.ParseIP("10.0.0.2")}},
+		map[string][]net.IP{"a.": {net.ParseIP("fd00::1")}},
+		mustAllowed(t, "10.0.0.0/8"),
+	)
+	aCount, aaaaCount := rc.Counts()
+	if aCount != 2 || aaaaCount != 1 {
+		t.Fatalf("expected counts 2/1, got %d/%d", aCount, aaaaCount)
+	}
+}
+
 func TestAllowedNets_Contains(t *testing.T) {
 	a := mustAllowed(t, "10.10.0.0/16")
 	if !a.Contains(net.ParseIP("10.10.1.2")) || !a.Contains(net.ParseIP("127.0.0.1")) {
@@ -738,14 +751,25 @@ func TestServeDNS_ANY(t *testing.T) {
 func TestServeDNS_SOA(t *testing.T) {
 	p := basePlugin(t)
 	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 1111}}
-	req := new(dns.Msg)
-	req.SetQuestion("anything.zt.example.com.", dns.TypeSOA)
-	rcode, _ := p.ServeDNS(context.Background(), rw, req)
+
+	apexReq := new(dns.Msg)
+	apexReq.SetQuestion("zt.example.com.", dns.TypeSOA)
+	rcode, _ := p.ServeDNS(context.Background(), rw, apexReq)
 	if rcode != dns.RcodeSuccess || len(rw.msg.Answer) != 1 {
-		t.Fatalf("expected SOA answer, got rcode=%d answers=%d", rcode, len(rw.msg.Answer))
+		t.Fatalf("expected apex SOA answer, got rcode=%d answers=%d", rcode, len(rw.msg.Answer))
 	}
 	if _, ok := rw.msg.Answer[0].(*dns.SOA); !ok {
 		t.Fatalf("expected SOA answer, got %T", rw.msg.Answer[0])
+	}
+
+	nonexistentReq := new(dns.Msg)
+	nonexistentReq.SetQuestion("anything.zt.example.com.", dns.TypeSOA)
+	rcode, _ = p.ServeDNS(context.Background(), rw, nonexistentReq)
+	if rcode != dns.RcodeNameError || len(rw.msg.Ns) != 1 || len(rw.msg.Answer) != 0 {
+		t.Fatalf("expected NXDOMAIN with SOA in authority, got rcode=%d ns=%d answer=%d", rcode, len(rw.msg.Ns), len(rw.msg.Answer))
+	}
+	if _, ok := rw.msg.Ns[0].(*dns.SOA); !ok {
+		t.Fatalf("expected SOA in authority, got %T", rw.msg.Ns[0])
 	}
 }
 
@@ -784,21 +808,21 @@ func TestServeDNS_DNSSD_TXT(t *testing.T) {
 	}
 }
 
-func TestServeDNS_ShortName_AllowShort_OutOfZonePassthrough(t *testing.T) {
+func TestServeDNS_ShortName_Hit(t *testing.T) {
 	p := basePlugin(t)
 	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 1111}}
 	req := new(dns.Msg)
 	req.SetQuestion("server01.", dns.TypeA)
 	rcode, err := p.ServeDNS(context.Background(), rw, req)
 	if err != nil || rcode != dns.RcodeSuccess {
-		t.Fatalf("expected out-of-zone short-name passthrough, got rcode=%d err=%v", rcode, err)
+		t.Fatalf("expected short-name hit, got rcode=%d err=%v", rcode, err)
 	}
-	if rw.msg != nil {
-		t.Fatal("out-of-zone short-name should be handled by next plugin")
+	if rw.msg == nil || len(rw.msg.Answer) != 1 {
+		t.Fatalf("expected one short-name answer, got %d", len(rw.msg.Answer))
 	}
 }
 
-func TestServeDNS_ShortName_AllowShort_MissPassthrough(t *testing.T) {
+func TestServeDNS_ShortName_Miss(t *testing.T) {
 	p := basePlugin(t)
 	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 1111}}
 	req := new(dns.Msg)
@@ -839,6 +863,39 @@ func TestServeDNS_AllowShort_DoesNotChangeInZoneMiss(t *testing.T) {
 	}
 	if rw.msg == nil || len(rw.msg.Ns) == 0 {
 		t.Fatal("expected SOA in authority for in-zone miss")
+	}
+}
+
+func TestServeDNS_DNSSD_Custom(t *testing.T) {
+	p := basePlugin(t)
+	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.20.9"), Port: 1111}}
+	req := new(dns.Msg)
+	req.SetQuestion("_dns-sd._udp.zt.example.com.", dns.TypeTXT)
+	rcode, _ := p.ServeDNS(context.Background(), rw, req)
+	if rcode != dns.RcodeSuccess || len(rw.msg.Answer) != 1 {
+		t.Fatalf("expected TXT answer for default search domain, got rcode=%d answers=%d", rcode, len(rw.msg.Answer))
+	}
+}
+
+func TestServeDNS_Allowed_ZT(t *testing.T) {
+	p := basePlugin(t)
+	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("10.147.99.9"), Port: 1111}}
+	req := new(dns.Msg)
+	req.SetQuestion("server01.zt.example.com.", dns.TypeA)
+	rcode, _ := p.ServeDNS(context.Background(), rw, req)
+	if rcode != dns.RcodeSuccess {
+		t.Fatalf("expected allowed ZT query, got rcode=%d", rcode)
+	}
+}
+
+func TestServeDNS_Allowed_Loopback(t *testing.T) {
+	p := basePlugin(t)
+	rw := &fakeRW{remoteAddr: &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 1111}}
+	req := new(dns.Msg)
+	req.SetQuestion("server01.zt.example.com.", dns.TypeA)
+	rcode, _ := p.ServeDNS(context.Background(), rw, req)
+	if rcode != dns.RcodeSuccess {
+		t.Fatalf("expected loopback to be allowed, got rcode=%d", rcode)
 	}
 }
 

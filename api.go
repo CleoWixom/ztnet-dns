@@ -148,7 +148,8 @@ func (c *APIClient) getJSON(ctx context.Context, token, path string, out any) er
 			_ = resp.Body.Close()
 			return fmt.Errorf("GET %s status %d", path, resp.StatusCode)
 		}
-		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		const maxResponseBody = 10 << 20
+		if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBody)).Decode(out); err != nil {
 			_ = resp.Body.Close()
 			return fmt.Errorf("decode %s: %w", path, err)
 		}
