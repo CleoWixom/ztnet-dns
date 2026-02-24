@@ -129,7 +129,7 @@ install-config:
 
 install-helper:
 	install -d "$(DESTDIR)$(BINDIR)"
-	install -m 0755 scripts/ztnetool "$(DESTDIR)$(BINDIR)/ztnetool"
+	install -m 0755 packaging/ztnetool "$(DESTDIR)$(BINDIR)/ztnetool"
 
 install-service:
 	@if [ -n "$(DESTDIR)" ]; then \
