@@ -9,6 +9,7 @@ type cacheSnapshot struct {
 	a       map[string][]net.IP
 	aaaa    map[string][]net.IP
 	allowed *AllowedNets
+	serial  uint32
 }
 
 // RecordCache is an atomic immutable snapshot cache for DNS records and ACLs.
@@ -19,7 +20,7 @@ type RecordCache struct {
 // NewRecordCache creates an initialized cache with empty maps and nil allowlist.
 func NewRecordCache() *RecordCache {
 	rc := &RecordCache{}
-	rc.snap.Store(cacheSnapshot{a: map[string][]net.IP{}, aaaa: map[string][]net.IP{}, allowed: nil})
+	rc.snap.Store(cacheSnapshot{a: map[string][]net.IP{}, aaaa: map[string][]net.IP{}, allowed: nil, serial: 1})
 	return rc
 }
 
@@ -38,7 +39,9 @@ func cloneRecords(in map[string][]net.IP) map[string][]net.IP {
 
 // Set atomically publishes a new snapshot.
 func (r *RecordCache) Set(a, aaaa map[string][]net.IP, allowed *AllowedNets) {
-	r.snap.Store(cacheSnapshot{a: cloneRecords(a), aaaa: cloneRecords(aaaa), allowed: allowed})
+	prev := r.load()
+	next := cacheSnapshot{a: cloneRecords(a), aaaa: cloneRecords(aaaa), allowed: allowed, serial: prev.serial + 1}
+	r.snap.Store(next)
 }
 
 func (r *RecordCache) load() cacheSnapshot             { return r.snap.Load().(cacheSnapshot) }
@@ -57,4 +60,8 @@ func (r *RecordCache) IsAllowed(ip net.IP, strictStart bool) bool {
 func (r *RecordCache) Counts() (int, int) {
 	s := r.load()
 	return len(s.a), len(s.aaaa)
+}
+
+func (r *RecordCache) Serial() uint32 {
+	return r.load().serial
 }
