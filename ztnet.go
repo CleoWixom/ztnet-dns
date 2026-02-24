@@ -156,7 +156,9 @@ func (p *ZtnetPlugin) start(ctx context.Context) {
 				clog.Errorf("ztnet: panic in refresh goroutine: %v", r)
 			}
 		}()
-		_ = p.refresh(ctx)
+		if err := p.refresh(ctx); err != nil {
+			clog.Warningf("ztnet: initial refresh failed for zone %s: %v", p.zone, err)
+		}
 		t := time.NewTicker(p.cfg.Refresh)
 		defer t.Stop()
 		for {
