@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coredns/caddy"
 	"github.com/miekg/dns"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -336,6 +337,62 @@ func TestLoadToken_Env_Unset(t *testing.T) {
 	t.Setenv(envName, "")
 	if _, err := LoadToken(TokenConfig{Source: TokenSourceEnv, Value: envName}); err == nil {
 		t.Fatal("expected unset env error")
+	}
+}
+
+func TestParse_NetworkIDInvalidLength(t *testing.T) {
+	input := `ztnet {
+		api_url http://127.0.0.1:3000
+		network_id 17d395d8cb43a80
+		zone zt.example.com
+		token_env ZTNET_API_TOKEN
+	}`
+
+	c := caddy.NewTestController("dns", input)
+	_, err := parse(c)
+	if err == nil {
+		t.Fatal("expected network_id length validation error")
+	}
+	if !strings.Contains(err.Error(), "network_id parse") {
+		t.Fatalf("expected parse context in error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "exactly 16 hex characters") {
+		t.Fatalf("expected length validation in error, got %v", err)
+	}
+}
+
+func TestParse_NetworkIDNonHex(t *testing.T) {
+	input := `ztnet {
+		api_url http://127.0.0.1:3000
+		network_id 17d395d8cb43a80z
+		zone zt.example.com
+		token_env ZTNET_API_TOKEN
+	}`
+
+	c := caddy.NewTestController("dns", input)
+	_, err := parse(c)
+	if err == nil {
+		t.Fatal("expected network_id hex validation error")
+	}
+	if !strings.Contains(err.Error(), "network_id parse") {
+		t.Fatalf("expected parse context in error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "only hex characters") {
+		t.Fatalf("expected hex validation in error, got %v", err)
+	}
+}
+
+func TestParse_NetworkIDValidHex(t *testing.T) {
+	input := `ztnet {
+		api_url http://127.0.0.1:3000
+		network_id 17d395d8cb43a800
+		zone zt.example.com
+		token_env ZTNET_API_TOKEN
+	}`
+
+	c := caddy.NewTestController("dns", input)
+	if _, err := parse(c); err != nil {
+		t.Fatalf("expected valid network_id, got %v", err)
 	}
 }
 
