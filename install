@@ -194,23 +194,22 @@ validate_bool() { case "${1,,}" in true|false) return 0 ;; *) return 1 ;; esac; 
 collect_inputs() {
   echo -e "${C_BOLD}=== Installation parameters ===${C_RESET}"
   prompt_default API_URL "1) API_URL" "http://127.0.0.1:3000"
-  prompt_required TOKEN_INPUT "2) API TOKEN (*): "
-  prompt_required NETWORK_ID "3) NETWORK_ID (*): "
-  prompt_default ZONE "4) ZONE" "ztnet.local"
+  prompt_required NETWORK_ID "2) NETWORK_ID (*): "
+  prompt_default ZONE "3) ZONE" "ztnet.local"
 
   local extra=""
-  prompt_default extra "5) Configure additional parameters? [Yes/No]" "No"
+  prompt_default extra "4) Configure additional parameters? [Yes/No]" "No"
   if [[ "${extra,,}" == "yes" || "${extra,,}" == "y" ]]; then
-    prompt_default EXITNODE_IPV4 "6) EXITNODE_IPV4" "192.168.55.1"
+    prompt_default EXITNODE_IPV4 "5) EXITNODE_IPV4" "192.168.55.1"
     if [[ "$IPV6_DISABLE" == false ]]; then
-      prompt_default EXITNODE_IPV6 "7) EXITNODE_IPV6" "fc4e:1d7b:a5ac:d8cf:20e2::1"
+      prompt_default EXITNODE_IPV6 "6) EXITNODE_IPV6" "fc4e:1d7b:a5ac:d8cf:20e2::1"
     fi
-    prompt_default AUTO_ALLOW_ZT "8) AUTO_ALLOW_ZT [true/false]" "true"
+    prompt_default AUTO_ALLOW_ZT "7) AUTO_ALLOW_ZT [true/false]" "true"
     validate_bool "$AUTO_ALLOW_ZT" || fail "AUTO_ALLOW_ZT must be true or false"
-    prompt_default REFRESH "9) REFRESH" "30s"
-    prompt_default TIMEOUT "10) TIMEOUT" "5s"
-    prompt_default TTL "11) TTL" "60"
-    prompt_default DNS_UPSTREAM "12) DNS_UPSTREAM" "1.1.1.1 8.8.8.8"
+    prompt_default REFRESH "8) REFRESH" "30s"
+    prompt_default TIMEOUT "9) TIMEOUT" "5s"
+    prompt_default TTL "10) TTL" "60"
+    prompt_default DNS_UPSTREAM "11) DNS_UPSTREAM" "1.1.1.1 8.8.8.8"
   fi
 }
 
@@ -308,7 +307,7 @@ main() {
   write_corefile
 
   log "Writing token via ztnetool"
-  /usr/bin/ztnetool -t "$TOKEN_INPUT" --token-file "$FILE_TOKEN" --corefile /etc/coredns/Corefile
+  /usr/bin/ztnetool -t --token-file "$FILE_TOKEN" --corefile /etc/coredns/Corefile
   /usr/bin/ztnetool -c --api-url "$API_URL" --network-id "$NETWORK_ID" --token-file "$FILE_TOKEN"
 
   start_service
