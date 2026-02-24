@@ -18,6 +18,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.event.pull_request.merge_commit_sha || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   release:
     if: github.event_name == 'push' || github.event.pull_request.merged == true
@@ -29,6 +33,9 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+
+      - name: Ensure local main ref exists for tag history comparison
+        run: git checkout -B main "${{ github.event.pull_request.merge_commit_sha || github.sha }}"
 
       - name: Setup Go from go.mod
         uses: actions/setup-go@v5
