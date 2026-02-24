@@ -164,7 +164,8 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: false   # у этого job другой GOPATH — кэш CoreDNS большой
+          cache: true
+          cache-dependency-path: go.sum
 
       # ── Вычислить версию пакета ────────────────────────────────────────
       # На теге vX.Y.Z → "X.Y.Z"
